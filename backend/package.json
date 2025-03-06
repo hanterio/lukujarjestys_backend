@@ -20,7 +20,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "echo \\\"Error: no test specified\\\" && exit 1"
+    "test": "echo \\\"Error: no test specified\\\" && exit 1",
+    "build:ui": "cd /mnt/c/Users/hanne/projektit/lukujarjestys/frontend && npm run build && cp -r dist /mnt/c/Users/hanne/projektit/lukujarjestys_backend/backend",
+    "deploy:full": "npm run build:ui && git add . && git commit -m uibuild && git push"
   },
   "dependencies": {
     "cors": "^2.8.5",

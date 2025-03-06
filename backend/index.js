@@ -60,8 +60,8 @@ let kurssit = [
       }] 
 
 
-app.get('/', (request, response) => {
-    response.send('<h1>Hello World!</h1>')
+app.get('/info', (request, response) => {
+    response.send('<h1>Tervetuloa suunnittelusovellukseen!</h1>')
   })
   
 app.get('/api/kurssit', (request, response) => {
