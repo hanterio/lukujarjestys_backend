@@ -1,6 +1,9 @@
+require('dotenv').config()
 const express = require('express')
 const morgan = require('morgan')
 const cors = require('cors')
+const Kurssi = require('./models/kurssi')
+const Tehtava = require('./models/tehtava')
 
 const app = express()
 
@@ -8,112 +11,167 @@ app.use(express.json())
 app.use(cors())
 app.use(express.static('dist'))
 
-morgan.token('body', (req, res) => {
-    return req.body ? JSON.stringify(req.body) : ''
+morgan.token('body', (req) => {
+  return req.body ? JSON.stringify(req.body) : ''
 })
 app.use(morgan(':method :url :status :res[content-length] - :response-time ms :body'))
 
-
-
-let kurssit = [
-      {
-        "id": "1",
-        "nimi": "BI01.1",
-        "aste": "lukio",
-        "opiskelijat": "2",
-        "opettaja": [],
-        "opetus": [
-          {
-            "periodi": 2,
-            "palkki": "1",
-            "tunnit_viikossa": 3
-          }
-        ]
-      },
-      {
-        "id": "2",
-        "nimi": "BI01.2",
-        "aste": "lukio",
-        "opiskelijat": "3",
-        "opettaja": [],
-        "opetus": [
-          {
-            "periodi": 3,
-            "palkki": "3",
-            "tunnit_viikossa": 3
-          }
-        ]
-      },
-      {
-        "id": "3",
-        "nimi": "BI01.3",
-        "aste": "lukio",
-        "opiskelijat": "1",
-        "opettaja": [],
-        "opetus": [
-          {
-            "periodi": 4,
-            "palkki": "1",
-            "tunnit_viikossa": 3
-          }
-        ]
-      }] 
-
-
 app.get('/info', (request, response) => {
-    response.send('<h1>Tervetuloa suunnittelusovellukseen!</h1>')
-  })
-  
+  response.send('<h1>Tervetuloa suunnittelusovellukseen!</h1>')
+})
+
 app.get('/api/kurssit', (request, response) => {
-response.json(kurssit)
-})
-
-app.get('/api/kurssit/:id', (request, response) => {
-    const id = request.params.id
-    const kurssi = kurssit.find(kurssi => kurssi.id === id)
-    
-    if (kurssi) {    
-        response.json(kurssi)
-    } else {
-        response.status(404).end()
-    }
-})
-
-app.delete('/api/kurssit/:id', (request, response) => {
-    const id = request.params.id
-    kurssit = kurssit.filter(kurssi => kurssi.id !== id)
-  
-    response.status(204).end()
+  Kurssi.find({}).then(kurssit => {
+    response.json(kurssit)
   })
-
-  
-  app.post('/api/kurssit', (request, response) => {
-    const uusiId = kurssit.length > 0
-        ? Math.floor(Math.random() * 1000000000) 
-        : 1
-
-    const body = request.body
-
-    if (!body.nimi) {
-        return response.status(400).json({
-            error: 'kurssin nimi puuttuu'
-        })
-    }
-
-    const kurssi = {
-        "nimi": body.nimi,
-        "aste": body.aste,
-        "id": String(uusiId),
-        "opiskelijat": body.aste,
-        "opettaja": body.aste,
-        "opetus": body.opetus
-
-    }
-
-    kurssit = kurssit.concat(kurssi)
-
-    response.json(kurssi)
 })
+
+app.get('/api/tehtavat', (request, response) => {
+  Tehtava.find({}).then(tehtavat => {
+    response.json(tehtavat)
+  })
+})
+
+app.get('/api/kurssit/:id', (request, response, next) => {
+  Kurssi.findById(request.params.id).then(kurssi => {
+    if (kurssi) {
+      response.json(kurssi)
+    } else {
+      response.status(404).end()
+    }
+  })
+    .catch(error => next(error))
+})
+
+app.get('/api/tehtavat/:_id', (request, response, next) => {
+  Tehtava.findById(request.params._id).then(tehtava => {
+    if (tehtava) {
+      response.json(tehtava)
+    } else {
+      response.status(404).end()
+    }
+  })
+    .catch(error => next(error))
+})
+
+
+app.delete('/api/kurssit/:id', (request, response, next) => {
+  Kurssi.findByIdAndDelete(request.params.id)
+    .then(() => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
+})
+
+
+app.delete('/api/tehtavat/:id', (request, response, next) => {
+  Tehtava.findByIdAndDelete(request.params.id)
+    .then(() => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
+})
+
+
+app.post('/api/kurssit', (request, response, next) => {
+  const body = request.body
+
+  if (!body.nimi) {
+    return next(new Error('kurssin nimi puuttuu'))
+  }
+
+  const kurssi = new Kurssi({
+    'nimi': body.nimi,
+    'aste': body.aste,
+    'opiskelijat': body.opiskelijat,
+    'opettaja': body.opettaja,
+    'opetus': body.opetus,
+  })
+  kurssi.save().then(savedKurssi => {
+    response.json(savedKurssi)
+  })
+})
+
+app.post('/api/tehtavat', (request, response, next) => {
+  const body = request.body
+
+  if (!body.kuvaus) {
+    return next(new Error('tehtävän kuvaus puuttuu'))
+  }
+
+  const tehtava = new Tehtava({
+    'kuvaus': body.kuvaus,
+    'opettaja': body.opettaja,
+    'vvt': body.vvt,
+    'eur': body.eur,
+    'rahana': body.rahana,
+  })
+  tehtava.save().then(savedTehtava => {
+    response.json(savedTehtava)
+  })
+})
+
+app.put('/api/kurssit/:id', (request, response, next) => {
+  const body = request.body
+
+  const kurssi = {
+    nimi: body.nimi,
+    aste: body.aste,
+    opiskelijat: body.opiskelijat,
+    opettaja: body.opettaja,
+    opetus: body.opetus,
+  }
+
+  Kurssi.findByIdAndUpdate(request.params.id, kurssi, { new: true })
+    .then(updatedKurssi => {
+      response.json(updatedKurssi)
+    })
+    .catch(error => next(error))
+})
+
+app.put('/api/tehtavat/:_id', (request, response, next) => {
+  console.log("PUT-pyyntö vastaanotettu ID:llä:", request.params.id);
+  console.log("Body data:", request.body)
+  
+  const body = request.body
+
+  const tehtava = {
+    kuvaus: body.kuvaus,
+    opettaja: body.opettaja,
+    vvt: body.vvt,
+    eur: body.eur,
+    rahana: body.rahana,
+  }
+
+  Tehtava.findByIdAndUpdate(request.params._id, tehtava, { new: true })
+    .then(updatedTehtava => {
+      response.json(updatedTehtava)
+    })
+    .catch(error => next(error))
+})
+
+const unknownEndpoint = (request, response) => {
+  response.status(404).send({ error: 'unknown endpoint' })
+}
+
+// olemattomien osoitteiden käsittely
+app.use(unknownEndpoint)
+
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message)
+
+  if (error.message === 'kurssin nimi puuttuu') {
+    return response.status(400).json({ error: error.message })
+  }
+
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'virheellinen id' })
+  }
+
+  next(error)
+}
+
+app.use(errorHandler)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
