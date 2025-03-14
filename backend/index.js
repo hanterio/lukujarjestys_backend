@@ -4,6 +4,7 @@ const morgan = require('morgan')
 const cors = require('cors')
 const Kurssi = require('./models/kurssi')
 const Tehtava = require('./models/tehtava')
+const Opettaja = require('./models/opettajat')
 
 const app = express()
 
@@ -32,6 +33,12 @@ app.get('/api/tehtavat', (request, response) => {
   })
 })
 
+app.get('/api/opettajat', (request, response) => {
+  Opettaja.find({}).then(opettajat => {
+    response.json(opettajat)
+  })
+})
+
 app.get('/api/kurssit/:id', (request, response, next) => {
   Kurssi.findById(request.params.id).then(kurssi => {
     if (kurssi) {
@@ -54,6 +61,17 @@ app.get('/api/tehtavat/:_id', (request, response, next) => {
     .catch(error => next(error))
 })
 
+app.get('/api/opettajat/:_id', (request, response, next) => {
+  Opettaja.findById(request.params._id).then(opettaja => {
+    if (opettaja) {
+      response.json(opettaja)
+    } else {
+      response.status(404).end()
+    }
+  })
+    .catch(error => next(error))
+})
+
 
 app.delete('/api/kurssit/:id', (request, response, next) => {
   Kurssi.findByIdAndDelete(request.params.id)
@@ -64,8 +82,16 @@ app.delete('/api/kurssit/:id', (request, response, next) => {
 })
 
 
-app.delete('/api/tehtavat/:id', (request, response, next) => {
-  Tehtava.findByIdAndDelete(request.params.id)
+app.delete('/api/tehtavat/:_id', (request, response, next) => {
+  Tehtava.findByIdAndDelete(request.params._id)
+    .then(() => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
+})
+
+app.delete('/api/opettajat/:_id', (request, response, next) => {
+  Opettaja.findByIdAndDelete(request.params._id)
     .then(() => {
       response.status(204).end()
     })
@@ -111,6 +137,22 @@ app.post('/api/tehtavat', (request, response, next) => {
   })
 })
 
+app.post('/api/opettajat', (request, response, next) => {
+  const body = request.body
+
+  if (!body.opettaja) {
+    return next(new Error('opettajatunnus puuttuu'))
+  }
+
+  const opettaja = new Opettaja({
+    'opettaja': body.opettaja,
+    'opv': body.opv,
+  })
+  opettaja.save().then(savedOpettaja => {
+    response.json(savedOpettaja)
+  })
+})
+
 app.put('/api/kurssit/:id', (request, response, next) => {
   const body = request.body
 
@@ -153,6 +195,24 @@ app.put('/api/tehtavat/:_id', (request, response, next) => {
 const unknownEndpoint = (request, response) => {
   response.status(404).send({ error: 'unknown endpoint' })
 }
+
+app.put('/api/opettajat/:_id', (request, response, next) => {
+  console.log("PUT-pyyntö vastaanotettu ID:llä:", request.params.id);
+  console.log("Body data:", request.body)
+  
+  const body = request.body
+
+  const opettaja = {
+    opettaja: body.opettaja,
+    opv: body.opv,
+  }
+
+  Opettaja.findByIdAndUpdate(request.params._id, opettaja, { new: true })
+    .then(updatedOpettaja => {
+      response.json(updatedOpettaja)
+    })
+    .catch(error => next(error))
+})
 
 // olemattomien osoitteiden käsittely
 app.use(unknownEndpoint)
