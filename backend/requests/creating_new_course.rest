@@ -1,0 +1,17 @@
+POST http://localhost:3001/api/kurssit/
+Content-Type: application/json
+
+{
+      "nimi": "FY05.2",
+      "aste": "lukio",
+      "vvt": 1.1,
+      "opiskelijat": "5",
+      "opettaja": [],
+      "opetus": [
+        {
+          "periodi": 2,
+          "palkki": "4",
+          "tunnit_viikossa": 3
+        }
+      ]
+    }

@@ -1,18 +1,5 @@
 const mongoose = require('mongoose')
 
-mongoose.set('strictQuery', false)
-
-const url = process.env.MONGODB_URI
-
-console.log('connecting to', url)
-mongoose.connect(url)
-  .then(() => {
-    console.log('connected to MongoDB')
-  })
-  .catch((error) => {
-    console.log('error connecting to MongoDB:', error.message)
-  })
-
 const opetusSchema = new mongoose.Schema({
   periodi: Number,
   palkki: String,
@@ -20,7 +7,10 @@ const opetusSchema = new mongoose.Schema({
 })
 
 const kurssiSchema = new mongoose.Schema({
-  nimi: String,
+  nimi: {
+    type: String,
+    required: true,
+  },
   aste: String,
   luokka: [String],
   vvt: String,
