@@ -109,6 +109,8 @@ app.post('/api/kurssit', (request, response, next) => {
   const kurssi = new Kurssi({
     'nimi': body.nimi,
     'aste': body.aste,
+    'luokka': body.luokka,
+    'vvt': body.vvt,
     'opiskelijat': body.opiskelijat,
     'opettaja': body.opettaja,
     'opetus': body.opetus,
@@ -159,6 +161,8 @@ app.put('/api/kurssit/:id', (request, response, next) => {
   const kurssi = {
     nimi: body.nimi,
     aste: body.aste,
+    luokka: body.luokka,
+    vvt: body.vvt,
     opiskelijat: body.opiskelijat,
     opettaja: body.opettaja,
     opetus: body.opetus,

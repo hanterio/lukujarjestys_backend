@@ -22,6 +22,8 @@ const opetusSchema = new mongoose.Schema({
 const kurssiSchema = new mongoose.Schema({
   nimi: String,
   aste: String,
+  luokka: [String],
+  vvt: String,
   opiskelijat: String,
   opettaja: [String],
   opetus: [opetusSchema]

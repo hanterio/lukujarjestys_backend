@@ -11,11 +11,14 @@ mongoose.connect(url)
   .catch((error) => {
     console.log('error connecting to MongoDB:', error.message)
   })
-  
+
 const tehtavaSchema = new mongoose.Schema({
     kuvaus: String,
     opettaja: String,
-    vvt: Number,
+    vvt: {
+        type: Number,
+        set: v => parseFloat(String(v).replace(',', '.')) || 0
+    },
     eur: Number,
     rahana: Boolean,
 
