@@ -8,6 +8,7 @@ const middleware = require('./utils/middleware')
 const kurssitRouter = require('./controllers/kurssit')
 const opettajatRouter = require('./controllers/opettajat')
 const tehtavatRouter = require('./controllers/tehtavat')
+const infoRouter = require('./controllers/info')
 const mongoose = require('mongoose')
 
 mongoose.set('strictQuery', false)
@@ -37,14 +38,10 @@ app.use(morgan(':method :url :status :res[content-length] - :response-time ms :b
 app.use('/api/kurssit', kurssitRouter)
 app.use('/api/opettajat', opettajatRouter)
 app.use('/api/tehtavat', tehtavatRouter)
+app.use('/info', infoRouter)
+
 
 app.use(middleware.unknownEndpoint)
 app.use(middleware.errorHandler)
-
-
-
-app.get('/info', (request, response) => {
-  response.send('<h1>Tervetuloa suunnittelusovellukseen!</h1>')
-})
 
 module.exports = app
