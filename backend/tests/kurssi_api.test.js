@@ -1,6 +1,8 @@
 const { test, after, describe, beforeEach } = require('node:test')
 const assert = require('node:assert')
 const mongoose = require('mongoose')
+const bcrypt = require('bcrypt')
+const Opettaja = require('../models/opettaja')
 const supertest = require('supertest')
 const app = require('../app')
 const api = supertest(app)
@@ -109,6 +111,59 @@ describe('Kurssien lisäämiseen liittyvät testit', () => {
     assert(!contents.includes(kurssiToDelete.nimi))
 
     assert.strictEqual(kurssitLopussa.length, helper.initialKurssit.length - 1)
+  })
+})
+
+describe('Opettajien lisääminen', () => {
+  beforeEach(async () => {
+    await Opettaja.deleteMany({})
+
+    const passwordHash = await bcrypt.hash('sekret', 10)
+    const opettaja = new Opettaja({ opettaja: 'root', opv: 20, passwordHash })
+
+    await opettaja.save()
+  })
+
+  test('uuden opettajan luominen onnistuu uniikilla tunnuksella', async () => {
+    const opettajatAluksi = await helper.opettajatInDb()
+
+    const newOpe = {
+      opettaja: 'KEX',
+      opv: 20,
+      password: 'salainen',
+    }
+
+    await api
+      .post('/api/opettajat')
+      .send(newOpe)
+      .expect(201)
+      .expect('Content-Type', /application\/json/)
+
+    const opettajatLopuksi = await helper.opettajatInDb()
+    assert.strictEqual(opettajatLopuksi.length, opettajatAluksi.length + 1)
+
+    const opettajat = opettajatLopuksi.map(u => u.opettaja)
+    assert(opettajat.includes(newOpe.opettaja))
+  })
+  test('uuden opettajan lisääminen epäonnistuu (ei ole uniikki)', async () => {
+    const opettajatAlussa = await helper.opettajatInDb()
+
+    const newOpe = {
+      opettaja: 'root',
+      opv: 20,
+      password: 'salainen',
+    }
+
+    const result = await api
+      .post('/api/opettajat')
+      .send(newOpe)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    const opettajatLopuksi = await helper.opettajatInDb()
+    assert(result.body.error.includes('expected `opettaja` to be unique'))
+
+    assert.strictEqual(opettajatLopuksi.length, opettajatAlussa.length)
   })
 })
 

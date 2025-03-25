@@ -1,15 +1,15 @@
+const bcrypt = require('bcrypt')
 const opettajatRouter = require('express').Router()
 const Opettaja = require('../models/opettaja')
 const logger = require('../utils/logger')
 
-opettajatRouter.get('/', (request, response) => {
-  Opettaja.find({}).then(opettajat => {
-    response.json(opettajat)
+opettajatRouter.get('/', async (request, response) => {
+  const opettajat = await Opettaja.find({})
+  response.json(opettajat)
   })
-})
 
-opettajatRouter.get('/:_id', (request, response, next) => {
-  Opettaja.findById(request.params._id).then(opettaja => {
+opettajatRouter.get('/:id', (request, response, next) => {
+  Opettaja.findById(request.params.id).then(opettaja => {
     if (opettaja) {
       response.json(opettaja)
     } else {
@@ -19,34 +19,32 @@ opettajatRouter.get('/:_id', (request, response, next) => {
     .catch(error => next(error))
 })
 
-opettajatRouter.delete('/:_id', (request, response, next) => {
-  Opettaja.findByIdAndDelete(request.params._id)
+opettajatRouter.delete('/:id', (request, response, next) => {
+  Opettaja.findByIdAndDelete(request.params.id)
     .then(() => {
       response.status(204).end()
     })
     .catch(error => next(error))
 })
 
-opettajatRouter.post('/api/opettajat', (request, response, next) => {
-  const body = request.body
+opettajatRouter.post('/', async (request, response) => {
+  const { opettaja, opv, password } = request.body
 
-  if (!body.opettaja) {
-    return next(new Error('opettajatunnus puuttuu'))
-  }
+  const saltRounds = 10
+  const passwordHash = await bcrypt.hash(password, saltRounds)
 
-  const opettaja = new Opettaja({
-    'opettaja': body.opettaja,
-    'opv': body.opv,
+  const ope = new Opettaja({
+    opettaja,
+    opv,
+    passwordHash
   })
-  opettaja.save()
-    .then(savedOpettaja => {
-      response.json(savedOpettaja)
-    })
-    .catch(error => next(error))
+
+  const savedOpettaja = await ope.save()
+  response.status(201).json(savedOpettaja)
 })
 
-opettajatRouter.put('/:_id', (request, response, next) => {
-  logger.info('PUT-pyyntö vastaanotettu ID:llä:', request.params._id)
+opettajatRouter.put('/:id', (request, response, next) => {
+  logger.info('PUT-pyyntö vastaanotettu ID:llä:', request.params.id)
   logger.info('Body data:', request.body)
 
   const body = request.body
@@ -56,7 +54,7 @@ opettajatRouter.put('/:_id', (request, response, next) => {
     opv: body.opv,
   }
 
-  Opettaja.findByIdAndUpdate(request.params._id, opettaja, { new: true })
+  Opettaja.findByIdAndUpdate(request.params.id, opettaja, { new: true })
     .then(updatedOpettaja => {
       response.json(updatedOpettaja)
     })

@@ -1,4 +1,5 @@
 const Kurssi = require('../models/kurssi')
+const Opettaja = require('../models/opettaja')
 
 const initialKurssit = [
   {
@@ -36,6 +37,14 @@ const kurssitInDb = async () => {
   return kurssit.map(kurssi => kurssi.toJSON())
 }
 
+const opettajatInDb = async () => {
+  const opettajat = await Opettaja.find({})
+  return opettajat.map(u => u.toJSON())
+}
+
 module.exports = {
-  initialKurssit, nonExistingId, kurssitInDb
+  initialKurssit,
+  nonExistingId,
+  kurssitInDb,
+  opettajatInDb
 }
