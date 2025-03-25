@@ -10,6 +10,7 @@ const kurssitRouter = require('./controllers/kurssit')
 const opettajatRouter = require('./controllers/opettajat')
 const tehtavatRouter = require('./controllers/tehtavat')
 const infoRouter = require('./controllers/info')
+const loginRouter = require('./controllers/login')
 const mongoose = require('mongoose')
 
 mongoose.set('strictQuery', false)
@@ -40,6 +41,7 @@ app.use('/api/kurssit', kurssitRouter)
 app.use('/api/opettajat', opettajatRouter)
 app.use('/api/tehtavat', tehtavatRouter)
 app.use('/info', infoRouter)
+app.use('/api/login', loginRouter)
 
 
 app.use(middleware.unknownEndpoint)
