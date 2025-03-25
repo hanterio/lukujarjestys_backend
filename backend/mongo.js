@@ -6,9 +6,11 @@ if (process.argv.length<3) {
 }
 
 const password = process.argv[2]
+const nimi = process.argv[3]
+const aste = process.argv[4]
 
 const url =
-    `mongodb+srv://hanterio:${password}@fso2025.b68e4.mongodb.net/lukkariApp?retryWrites=true&w=majority&appName=FSO2025`
+    `mongodb+srv://hanterio:${password}@fso2025.b68e4.mongodb.net/testiLukkariApp?retryWrites=true&w=majority&appName=FSO2025`
 
 mongoose.set('strictQuery', false)
 mongoose.connect(url)
@@ -20,7 +22,6 @@ const opetusSchema = new mongoose.Schema({
 })
 
 const noteSchema = new mongoose.Schema({
-  id: String,
   nimi: String,
   aste: String,
   opiskelijat: String,
@@ -30,13 +31,23 @@ const noteSchema = new mongoose.Schema({
 
 const Kurssi = mongoose.model('Kurssi', noteSchema)
 
-
+const kurssi = new Kurssi({
+  nimi: `${nimi}`,
+  aste: `${nimi}`,
+  opiskelijat: '',
+  opettaja: '',
+  opetus: {
+    periodi: 1,
+    tunnit_viikossa: 3,
+    palkki: 'vk'  }
+})
+/*
 Kurssi.find({}).then(result => {
   result.forEach(kurssi => {
     console.log(kurssi)
   })
   mongoose.connection.close()
-})
+})*/
 /*
 const kurssi = new Kurssi({
     "id": "2",
@@ -52,8 +63,8 @@ const kurssi = new Kurssi({
       }
     ]
   })
-
+*/
 kurssi.save().then(result => {
   console.log(`Uusi kurssi tallennettu`)
   mongoose.connection.close()
-})*/
+})

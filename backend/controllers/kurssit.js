@@ -1,32 +1,26 @@
 const kurssitRouter = require('express').Router()
 const Kurssi = require('../models/kurssi')
 
-kurssitRouter.get('/', (request, response) => {
-  Kurssi.find({}).then(kurssit => {
-    response.json(kurssit)
-  })
+kurssitRouter.get('/', async (request, response) => {
+  const kurssit = await Kurssi.find({})
+  response.json(kurssit)
 })
 
-kurssitRouter.get('/:id', (request, response, next) => {
-  Kurssi.findById(request.params.id).then(kurssi => {
-    if (kurssi) {
-      response.json(kurssi)
-    } else {
-      response.status(404).end()
-    }
-  })
-    .catch(error => next(error))
+kurssitRouter.get('/:id', async (request, response, next) => {
+  const kurssi = await Kurssi.findById(request.params.id)
+  if (kurssi) {
+    response.json(kurssi)
+  } else {
+    response.status(404).end()
+  }
 })
 
-kurssitRouter.delete('/:id', (request, response, next) => {
-  Kurssi.findByIdAndDelete(request.params.id)
-    .then(() => {
-      response.status(204).end()
-    })
-    .catch(error => next(error))
+kurssitRouter.delete('/:id', async (request, response, next) => {
+  await Kurssi.findByIdAndDelete(request.params.id)
+  response.status(204).end()
 })
 
-kurssitRouter.post('/', (request, response, next) => {
+kurssitRouter.post('/', async (request, response, next) => {
   const body = request.body
 
   if (!body.nimi) {
@@ -42,11 +36,8 @@ kurssitRouter.post('/', (request, response, next) => {
     'opettaja': body.opettaja,
     'opetus': body.opetus,
   })
-  kurssi.save()
-    .then(savedKurssi => {
-      response.json(savedKurssi)
-    })
-    .catch(error => next(error))
+  const savedKurssi = await kurssi.save()
+  response.status(201).json(savedKurssi)
 })
 
 

@@ -19,6 +19,15 @@ const kurssiSchema = new mongoose.Schema({
   opetus: [opetusSchema]
 })
 
+
+opetusSchema.set('toJSON', {
+  transform: (document, returnedObject) => {
+    returnedObject.id = returnedObject._id.toString()
+    delete returnedObject._id
+    delete returnedObject.__v
+  }
+})
+
 kurssiSchema.set('toJSON', {
   transform: (document, returnedObject) => {
     returnedObject.id = returnedObject._id.toString()
