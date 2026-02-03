@@ -1,10 +1,21 @@
 const kurssitRouter = require('express').Router()
 const Kurssi = require('../models/kurssi')
+const Lukuvuosi = require('../models/lukuvuosi')
 
-kurssitRouter.get('/', async (request, response) => {
-  const kurssit = await Kurssi.find({})
-  response.json(kurssit)
-})
+kurssitRouter.get('/', async (request, response, next) => {
+  try {
+    const aktiivinenVuosi = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+    if (!aktiivinenVuosi) {
+      return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
+    }
+
+    const kurssit = await Kurssi.find({
+      lukuvuosiId: aktiivinenVuosi._id
+    })
+    response.json(kurssit)
+  } catch (error) {
+    next(error)
+  }})
 
 kurssitRouter.get('/:id', async (request, response, next) => {
   const kurssi = await Kurssi.findById(request.params.id)
@@ -26,7 +37,10 @@ kurssitRouter.post('/', async (request, response, next) => {
   if (!body.nimi) {
     return next(new Error('kurssin nimi puuttuu'))
   }
-
+  const aktiivinenVuosi = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+  if (!aktiivinenVuosi) {
+    return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
+  }
   const kurssi = new Kurssi({
     'nimi': body.nimi,
     'aste': body.aste,
@@ -35,6 +49,7 @@ kurssitRouter.post('/', async (request, response, next) => {
     'opiskelijat': body.opiskelijat,
     'opettaja': body.opettaja,
     'opetus': body.opetus,
+    'lukuvuosiId': aktiivinenVuosi._id
   })
   const savedKurssi = await kurssi.save()
   response.status(201).json(savedKurssi)

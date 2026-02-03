@@ -16,7 +16,13 @@ const kurssiSchema = new mongoose.Schema({
   vvt: String,
   opiskelijat: String,
   opettaja: [String],
-  opetus: [opetusSchema]
+  opetus: [opetusSchema],
+
+  lukuvuosiId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lukuvuosi',
+    required: true
+  }
 })
 
 
