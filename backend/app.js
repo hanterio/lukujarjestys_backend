@@ -11,6 +11,7 @@ const opettajatRouter = require('./controllers/opettajat')
 const tehtavatRouter = require('./controllers/tehtavat')
 const infoRouter = require('./controllers/info')
 const loginRouter = require('./controllers/login')
+const raportitRouter = require('./routes/raportit')
 const mongoose = require('mongoose')
 
 mongoose.set('strictQuery', false)
@@ -38,6 +39,7 @@ morgan.token('body', (req) => {
 app.use(morgan(':method :url :status :res[content-length] - :response-time ms :body'))
 
 app.use('/api/kurssit', kurssitRouter)
+app.use('/api/raportit', raportitRouter)
 app.use('/api/opettajat', opettajatRouter)
 app.use('/api/tehtavat', tehtavatRouter)
 app.use('/info', infoRouter)

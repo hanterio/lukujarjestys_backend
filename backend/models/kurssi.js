@@ -22,6 +22,10 @@ const kurssiSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lukuvuosi',
     required: true
+  },
+  aineId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Aine'
   }
 })
 
