@@ -11,6 +11,7 @@ const opettajatRouter = require('./controllers/opettajat')
 const tehtavatRouter = require('./controllers/tehtavat')
 const infoRouter = require('./controllers/info')
 const loginRouter = require('./controllers/login')
+const aineetRouter = require('./controllers/aineet')
 const raportitRouter = require('./routes/raportit')
 const mongoose = require('mongoose')
 
@@ -44,6 +45,7 @@ app.use('/api/opettajat', opettajatRouter)
 app.use('/api/tehtavat', tehtavatRouter)
 app.use('/info', infoRouter)
 app.use('/api/login', loginRouter)
+app.use('/api/aineet', aineetRouter)
 
 
 app.use(middleware.unknownEndpoint)

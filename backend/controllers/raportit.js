@@ -246,5 +246,208 @@ const opettajaOpetusmaaraExcel = async (req, res) => {
   await wb.xlsx.write(res)
   res.end()
 }
+const opettajienKokonaistyomaaraExcel = async (req, res) => {
+  const Kurssi = require('../models/kurssi')
+  const Tehtava = require('../models/tehtava')
+  const Lukuvuosi = require('../models/lukuvuosi')
+  const ExcelJS = require('exceljs')
 
-module.exports = { opettajaOpetusmaaraExcel }
+  const aktiivinen = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+
+  if (!aktiivinen) {
+    return res.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
+  }
+
+  const kurssit = await Kurssi.find({ lukuvuosiId: aktiivinen._id })
+  const tehtavat = await Tehtava.find({})
+
+  const parseVvt = (value) =>
+    Number(String(value || "0").replace(",", "."))
+
+  const kieliAineet = ["SA", "RA", "LA", "VE"]
+
+  const opettajaData = {}
+
+  // ========================
+  // ====== KURSSIT =========
+  // ========================
+  kurssit.forEach(kurssi => {
+
+    const kurssiVvt = parseVvt(kurssi.vvt)
+    const opettajat = kurssi.opettaja || []
+
+    if (opettajat.length === 0) return
+
+    const jaettuVvt = kurssiVvt / opettajat.length
+
+    kurssi.opetus?.forEach(opetus => {
+
+      opettajat.forEach(op => {
+
+        if (!opettajaData[op]) {
+          opettajaData[op] = {
+            ylakoulu: 0,
+            lukio: 0,
+            muutVvt: 0,
+            eur: 0,
+            palkit: {}
+          }
+        }
+
+        const palkkiAvain = `${opetus.periodi}-${opetus.palkki}`
+
+        if (!opettajaData[op].palkit[palkkiAvain]) {
+          opettajaData[op].palkit[palkkiAvain] = []
+        }
+
+        opettajaData[op].palkit[palkkiAvain].push({
+          aste: kurssi.aste,
+          vvt: jaettuVvt,
+          nimi: kurssi.nimi
+        })
+      })
+    })
+  })
+
+  // ========================
+  // ====== SUMMAUS =========
+  // ========================
+  Object.values(opettajaData).forEach(opData => {
+
+    Object.values(opData.palkit).forEach(kurssitSamassaPalkissa => {
+
+      if (kurssitSamassaPalkissa.length === 0) return
+
+      // Tunnistetaan ainekoodi kurssin nimestä
+      const aineKoodi = kurssitSamassaPalkissa[0].nimi.substring(0, 2)
+      const onKieli = kieliAineet.includes(aineKoodi)
+
+      const vvtLista = kurssitSamassaPalkissa.map(k => k.vvt)
+
+      let laskettava
+
+      if (onKieli) {
+        // Kielet → samanaikainen → MAX
+        laskettava = Math.max(...vvtLista)
+      } else {
+        // Muut aineet → peräkkäinen → SUM
+        laskettava = vvtLista.reduce((a, b) => a + b, 0)
+      }
+
+      const aste = kurssitSamassaPalkissa[0].aste
+
+      if (aste === 'yläkoulu') {
+        opData.ylakoulu += laskettava
+      }
+
+      if (aste === 'lukio') {
+        opData.lukio += laskettava
+      }
+    })
+  })
+
+  // ========================
+  // ====== TEHTÄVÄT ========
+  // ========================
+  tehtavat.forEach(t => {
+
+    const op = t.opettaja
+
+    if (!opettajaData[op]) {
+      opettajaData[op] = {
+        ylakoulu: 0,
+        lukio: 0,
+        muutVvt: 0,
+        eur: 0,
+        palkit: {}
+      }
+    }
+
+    if (t.rahana) {
+      opettajaData[op].eur += Number(t.eur || 0)
+    } else {
+      opettajaData[op].muutVvt += parseVvt(t.vvt)
+    }
+  })
+
+  // ========================
+  // ====== EXCEL ===========
+  // ========================
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Kokonaistyömäärä')
+
+  ws.addRow([
+    'Opettaja',
+    'Yläkoulu VVT',
+    'Lukio VVT',
+    'Muut tehtävät VVT',
+    'Yhteensä VVT',
+    'Muut tehtävät EUR'
+  ])
+
+  ws.getRow(1).font = { bold: true }
+
+  let totalY = 0
+  let totalL = 0
+  let totalM = 0
+  let totalE = 0
+
+  Object.entries(opettajaData).forEach(([op, data]) => {
+
+    const yv = Number((data.ylakoulu || 0).toFixed(2))
+    const lv = Number((data.lukio || 0).toFixed(2))
+    const mv = Number((data.muutVvt || 0).toFixed(2))
+    const eur = Number((data.eur || 0).toFixed(2))
+    const total = Number((yv + lv + mv).toFixed(2))
+
+    totalY += yv
+    totalL += lv
+    totalM += mv
+    totalE += eur
+
+    ws.addRow([op, yv, lv, mv, total, eur])
+  })
+
+  const summaryRow = ws.addRow([
+    'YHTEENSÄ',
+    totalY.toFixed(2),
+    totalL.toFixed(2),
+    totalM.toFixed(2),
+    (totalY + totalL + totalM).toFixed(2),
+    totalE.toFixed(2)
+  ])
+
+  summaryRow.font = { bold: true }
+  summaryRow.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE2F0D9' }
+  }
+
+  ws.columns.forEach(column => {
+    let maxLength = 12
+    column.eachCell({ includeEmpty: true }, cell => {
+      const value = cell.value ? cell.value.toString() : ''
+      maxLength = Math.max(maxLength, value.length)
+    })
+    column.width = maxLength + 2
+  })
+
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  )
+
+  res.setHeader(
+    'Content-Disposition',
+    'attachment; filename=opettajien_kokonaistyomaara.xlsx'
+  )
+
+  await wb.xlsx.write(res)
+  res.end()
+}
+
+module.exports = {
+  opettajaOpetusmaaraExcel,
+  opettajienKokonaistyomaaraExcel
+}
