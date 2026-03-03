@@ -56,24 +56,36 @@ kurssitRouter.post('/', async (request, response, next) => {
 })
 
 
-kurssitRouter.put('/:id', (request, response, next) => {
-  const body = request.body
+kurssitRouter.put('/:id', async (request, response, next) => {
+  try {
+    const body = request.body
 
-  const kurssi = {
-    nimi: body.nimi,
-    aste: body.aste,
-    luokka: body.luokka,
-    vvt: body.vvt,
-    opiskelijat: body.opiskelijat,
-    opettaja: body.opettaja,
-    opetus: body.opetus,
+    const kurssi = await Kurssi.findById(request.params.id)
+
+    if (!kurssi) {
+      return response.status(404).end()
+    }
+    if (body.__v !== kurssi.__v) {
+      return response.status(409).json({
+        error: 'Kurssia on muokattu toisaalla. Päivitä sivu.'
+      })
+    }
+
+    kurssi.nimi = body.nimi
+    kurssi.aste = body.aste
+    kurssi.luokka = body.luokka
+    kurssi.vvt = body.vvt
+    kurssi.opiskelijat = body.opiskelijat
+    kurssi.opettaja = body.opettaja
+    kurssi.opetus = body.opetus
+
+    const savedKurssi = await kurssi.save()
+
+    response.json(savedKurssi)
+
+  } catch (error) {
+    next(error)
   }
-
-  Kurssi.findByIdAndUpdate(request.params.id, kurssi, { new: true })
-    .then(updatedKurssi => {
-      response.json(updatedKurssi)
-    })
-    .catch(error => next(error))
 })
 
 module.exports = kurssitRouter
