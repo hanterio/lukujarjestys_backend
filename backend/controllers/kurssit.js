@@ -12,13 +12,16 @@ kurssitRouter.get('/', async (request, response, next) => {
     const kurssit = await Kurssi.find({
       lukuvuosiId: aktiivinenVuosi._id
     })
+      .populate('aineId')
     response.json(kurssit)
   } catch (error) {
     next(error)
   }})
 
 kurssitRouter.get('/:id', async (request, response, next) => {
-  const kurssi = await Kurssi.findById(request.params.id)
+  const kurssi = await Kurssi
+    .findById(request.params.id)
+    .populate('aineId')
   if (kurssi) {
     response.json(kurssi)
   } else {
