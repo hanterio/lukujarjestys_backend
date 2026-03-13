@@ -35,7 +35,7 @@ opettajatRouter.post('/', async (request, response) => {
 
   const ope = new Opettaja({
     opettaja,
-    opv,
+    opv: opv ?? 0,
     passwordHash
   })
 
