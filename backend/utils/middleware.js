@@ -1,4 +1,6 @@
 const logger = require('./logger')
+const jwt = require('jsonwebtoken')
+const Opettaja = require('../models/opettaja')
 
 const requestLogger = (request, response, next) => {
   logger.info('Method:', request.method)
@@ -29,9 +31,47 @@ const errorHandler = (error, request, response, next) => {
 
   next(error)
 }
+const userExtractor = async (request, response, next) => {
+  const authorization = request.get('authorization')
+
+  if (!authorization || !authorization.startsWith('Bearer ')) {
+    return response.status(401).json({ error: 'token missing' })
+  }
+
+  const token = authorization.replace('Bearer ', '')
+
+  try {
+    const decodedToken = jwt.verify(token, process.env.SECRET)
+
+    if (!decodedToken.id) {
+      return response.status(401).json({ error: 'token invalid' })
+    }
+
+    const user = await Opettaja.findById(decodedToken.id)
+
+    if (!user) {
+      return response.status(401).json({ error: 'user not found' })
+    }
+
+    request.user = user
+    next()
+
+  } catch (error) {
+    return response.status(401).json({ error: 'token invalid' })
+  }
+}
+const adminOnly = (request, response, next) => {
+  if (!request.user || !request.user.admin) {
+    return response.status(403).json({ error: 'admin required' })
+  }
+
+  next()
+}
 
 module.exports = {
   requestLogger,
   unknownEndpoint,
-  errorHandler
+  errorHandler,
+  userExtractor,
+  adminOnly
 }

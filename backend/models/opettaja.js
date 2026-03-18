@@ -7,7 +7,11 @@ const opettajaSchema = new mongoose.Schema({
     unique: true
   },
   opv: Number,
-  passwordHash: String
+  passwordHash: String,
+  admin: {
+    type: Boolean,
+    default: false
+  }
 })
 
 opettajaSchema.set('toJSON', {
