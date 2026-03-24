@@ -13,6 +13,8 @@ const infoRouter = require('./controllers/info')
 const loginRouter = require('./controllers/login')
 const aineetRouter = require('./controllers/aineet')
 const raportitRouter = require('./routes/raportit')
+const lukuvuosiRouter = require('./controllers/lukuvuodet')
+const lukujarjestysRouter = require('./routes/lukujarjestykset')
 const mongoose = require('mongoose')
 
 mongoose.set('strictQuery', false)
@@ -46,7 +48,8 @@ app.use('/api/tehtavat', tehtavatRouter)
 app.use('/info', infoRouter)
 app.use('/api/login', loginRouter)
 app.use('/api/aineet', aineetRouter)
-
+app.use('/api/lukujarjestykset', lukujarjestysRouter)
+app.use('/api/lukuvuosi', lukuvuosiRouter)
 
 app.use(middleware.unknownEndpoint)
 app.use(middleware.errorHandler)
