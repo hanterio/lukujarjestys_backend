@@ -3,7 +3,8 @@ const mongoose = require('mongoose')
 const kurssiSijoitusSchema = new mongoose.Schema({
   kurssiId: { type: String, required: true },
   kurssiNimi: String,
-  palkkiKey: String
+  palkkiKey: String,
+  yhdistetytIdt: [String]  // 🔥 lisätty
 }, { _id: false })
 
 const tuntiSchema = new mongoose.Schema({
