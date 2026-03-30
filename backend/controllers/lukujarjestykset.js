@@ -2,6 +2,40 @@
 const mongoose = require('mongoose')
 const Lukujarjestys = require('../models/lukujarjestys')
 
+const tarkistaKonflikti = async (req, res) => {
+  const { paiva, tunti, periodi, lukuvuosiId } = req.query
+
+  try {
+    // hae kaikki sijoitukset tälle tuntipaikalle
+    const kaikki = await Lukujarjestys.find({
+      periodi: Number(periodi),
+      lukuvuosiId: new mongoose.Types.ObjectId(lukuvuosiId),
+      "tunnit.paiva": paiva,
+      "tunnit.tunti": Number(tunti)
+    })
+
+    // kerää kaikki kurssiIdt tältä tuntipaikalta
+    const varatutKurssiIdt = []
+    kaikki.forEach(lj => {
+      lj.tunnit
+        .filter(t => t.paiva === paiva && t.tunti === Number(tunti))
+        .forEach(t => {
+          t.kurssit.forEach(k => {
+            varatutKurssiIdt.push(k.kurssiId)
+            if (k.yhdistetytIdt) {
+              varatutKurssiIdt.push(...k.yhdistetytIdt)
+            }
+          })
+        })
+    })
+
+    res.json({ varatutKurssiIdt })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+
 // 🔍 HAE YKSI
 const getOne = async (req, res) => {
   const { nimi, tyyppi, periodi, lukuvuosiId } = req.query
@@ -56,4 +90,4 @@ const save = async (req, res) => {
   }
 }
 
-module.exports = { getOne, save }
+module.exports = { getOne, save, tarkistaKonflikti }
