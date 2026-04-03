@@ -12,14 +12,13 @@ kurssitRouter.get('/', async (request, response, next) => {
   try {
     const now = Date.now()
 
-    // 🔹 kurssi-cache (10s)
-    if (kurssiCache && now - kurssiCacheTime < 10000) {
-      return response.json(kurssiCache)
+    // Invalidoi cache jos eri koulu
+    const kouluId = request.kouluId?.toString()
+    if (kurssiCache && now - kurssiCacheTime < 10000 && kurssiCache._kouluId === kouluId) {
+      return response.json(kurssiCache._data)
     }
 
-    // 🔹 lukuvuosi-cache (60s)
     let aktiivinenVuosi = cachedLukuvuosi
-
     if (!aktiivinenVuosi || now - lukuvuosiCacheTime > 60000) {
       aktiivinenVuosi = await Lukuvuosi.findOne({ status: 'ACTIVE' })
       cachedLukuvuosi = aktiivinenVuosi
@@ -29,11 +28,16 @@ kurssitRouter.get('/', async (request, response, next) => {
       return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
     }
 
-    const kurssit = await Kurssi.find({
-      lukuvuosiId: aktiivinenVuosi._id
-    }).populate('aineId')
+    const query = { lukuvuosiId: aktiivinenVuosi._id }
 
-    kurssiCache = kurssit
+    // Suodatetaan koulun mukaan jos kouluId löytyy
+    if (request.kouluId) {
+      query.kouluId = request.kouluId
+    }
+
+    const kurssit = await Kurssi.find(query).populate('aineId')
+
+    kurssiCache = { _kouluId: kouluId, _data: kurssit }
     kurssiCacheTime = now
 
     response.json(kurssit)
@@ -70,25 +74,29 @@ kurssitRouter.post('/', async (request, response, next) => {
   if (!body.nimi) {
     return next(new Error('kurssin nimi puuttuu'))
   }
+  if (!request.kouluId) {
+    return response.status(400).json({
+      error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).'
+    })
+  }
   const aktiivinenVuosi = await Lukuvuosi.findOne({ status: 'ACTIVE' })
   if (!aktiivinenVuosi) {
     return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
   }
   const kurssi = new Kurssi({
-    'nimi': body.nimi,
-    'aste': body.aste,
-    'luokka': body.luokka,
-    'vvt': body.vvt,
-    'opiskelijat': body.opiskelijat,
-    'opettaja': body.opettaja,
-    'opetus': body.opetus,
-    'lukuvuosiId': aktiivinenVuosi._id
+    nimi: body.nimi,
+    aste: body.aste,
+    luokka: body.luokka,
+    vvt: body.vvt,
+    opiskelijat: body.opiskelijat,
+    opettaja: body.opettaja,
+    opetus: body.opetus,
+    lukuvuosiId: aktiivinenVuosi._id,
+    kouluId: request.kouluId  // ← lisätään
   })
   const savedKurssi = await kurssi.save()
   kurssiCache = null
-
   request.app.get('io').emit('kurssitPaivitetty')
-
   response.status(201).json(savedKurssi)
 })
 

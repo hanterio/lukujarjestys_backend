@@ -457,10 +457,17 @@ const optimoi = async (req, res) => {
     return res.status(400).json({ error: 'Puuttuvia tietoja' })
   }
 
+  if (!req.kouluId) {
+    return res.status(400).json({
+      error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).' })
+  }
+
+  const kouluId = req.kouluId
+
   try {
     console.log(`Optimointi alkaa – periodi ${periodi}`)
 
-    const kurssit = await Kurssi.find({ lukuvuosiId })
+    const kurssit = await Kurssi.find({ lukuvuosiId, kouluId })
     const aineet = await Aine.find({})
 
     const tuplatuntiAineet = {
@@ -488,6 +495,7 @@ const optimoi = async (req, res) => {
     const lukioLukujarjestykset = await Lukujarjestys.find({
       periodi,
       lukuvuosiId: objectId,
+      kouluId,
       nimi: { $in: [...lukioPalkkiNimet] }
     })
 
@@ -607,8 +615,8 @@ const optimoi = async (req, res) => {
         })
 
         return Lukujarjestys.findOneAndUpdate(
-          { nimi: palkkiKey, tyyppi: 'palkki', periodi, lukuvuosiId: objectId },
-          { $set: { tunnit: tunnitArray } },
+          { nimi: palkkiKey, tyyppi: 'palkki', periodi, lukuvuosiId: objectId, kouluId },
+          { $set: { tunnit: tunnitArray, kouluId } },
           { new: true, upsert: true, runValidators: true }
         )
       })

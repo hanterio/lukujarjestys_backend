@@ -13,8 +13,13 @@ const opettajaOpetusmaaraExcel = async (req, res) => {
     return res.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
   }
 
+  const kurssiMatch = { lukuvuosiId: aktiivinen._id }
+  if (req.kouluId) {
+    kurssiMatch.kouluId = req.kouluId
+  }
+
   const data = await Kurssi.aggregate([
-    { $match: { lukuvuosiId: aktiivinen._id }},
+    { $match: kurssiMatch },
 
     {
       $lookup: {
@@ -258,8 +263,17 @@ const opettajienKokonaistyomaaraExcel = async (req, res) => {
     return res.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
   }
 
-  const kurssit = await Kurssi.find({ lukuvuosiId: aktiivinen._id })
-  const tehtavat = await Tehtava.find({})
+  const kurssiQuery = { lukuvuosiId: aktiivinen._id }
+  if (req.kouluId) {
+    kurssiQuery.kouluId = req.kouluId
+  }
+  const kurssit = await Kurssi.find(kurssiQuery)
+
+  const tehtavaQuery = {}
+  if (req.kouluId) {
+    tehtavaQuery.kouluId = req.kouluId
+  }
+  const tehtavat = await Tehtava.find(tehtavaQuery)
 
   const parseVvt = (value) =>
     Number(String(value || "0").replace(",", "."))

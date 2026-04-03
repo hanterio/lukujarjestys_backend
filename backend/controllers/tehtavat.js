@@ -1,12 +1,35 @@
 const tehtavatRouter = require('express').Router()
 const Tehtava = require('../models/tehtava')
 const logger = require('../utils/logger')
+const middleware = require('../utils/middleware')
+const mongoose = require('mongoose')
 
-tehtavatRouter.get('/', (request, response) => {
-  Tehtava.find({}).then(tehtavat => {
-    response.json(tehtavat)
-  })
-})
+const omaKouluId = '69cc1858f37f1373e6e237ba'
+
+tehtavatRouter.get('/',
+  middleware.flexUserExtractor,
+  (request, response, next) => {
+    const kouluId = request.kouluId?.toString()
+    const onSuperadmin = request.user?.rooli === 'superadmin'
+
+    let suodatus
+    if (onSuperadmin) {
+      if (request.kouluId) {
+        suodatus = { kouluId: request.kouluId }
+      } else {
+        suodatus = {}
+      }
+    } else if (kouluId === omaKouluId) {
+      suodatus = { kouluId: new mongoose.Types.ObjectId(omaKouluId) }
+    } else {
+      suodatus = { kouluId: request.kouluId }
+    }
+
+    Tehtava.find(suodatus).then(tehtavat => {
+      response.json(tehtavat)
+    }).catch(next)
+  }
+)
 
 tehtavatRouter.get('/:_id', (request, response, next) => {
   Tehtava.findById(request.params._id).then(tehtava => {

@@ -15,6 +15,10 @@ const tehtavaSchema = new mongoose.Schema({
   },
   eur: Number,
   rahana: Boolean,
+  kouluId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Koulu'
+  }
 })
 
 module.exports = mongoose.model('Tehtava', tehtavaSchema)

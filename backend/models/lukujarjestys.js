@@ -30,11 +30,16 @@ const lukujarjestysSchema = new mongoose.Schema({
     ref: 'Lukuvuosi',
     required: true
   },
+  kouluId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Koulu',
+    required: true
+  },
   tunnit: [tuntiSchema]
 }, { timestamps: true })
 
 lukujarjestysSchema.index(
-  { nimi: 1, tyyppi: 1, periodi: 1, lukuvuosiId: 1 },
+  { nimi: 1, tyyppi: 1, periodi: 1, lukuvuosiId: 1, kouluId: 1 },
   { unique: true }
 )
 

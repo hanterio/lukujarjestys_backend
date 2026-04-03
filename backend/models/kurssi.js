@@ -26,6 +26,10 @@ const kurssiSchema = new mongoose.Schema({
   aineId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Aine'
+  },
+  kouluId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Koulu'
   }
 })
 

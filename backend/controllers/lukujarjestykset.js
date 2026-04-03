@@ -5,16 +5,19 @@ const Lukujarjestys = require('../models/lukujarjestys')
 const tarkistaKonflikti = async (req, res) => {
   const { paiva, tunti, periodi, lukuvuosiId } = req.query
 
+  if (!req.kouluId) {
+    return res.json({ varatutKurssiIdt: [] })
+  }
+
   try {
-    // hae kaikki sijoitukset tälle tuntipaikalle
     const kaikki = await Lukujarjestys.find({
       periodi: Number(periodi),
       lukuvuosiId: new mongoose.Types.ObjectId(lukuvuosiId),
+      kouluId: req.kouluId,
       "tunnit.paiva": paiva,
       "tunnit.tunti": Number(tunti)
     })
 
-    // kerää kaikki kurssiIdt tältä tuntipaikalta
     const varatutKurssiIdt = []
     kaikki.forEach(lj => {
       lj.tunnit
@@ -35,21 +38,20 @@ const tarkistaKonflikti = async (req, res) => {
   }
 }
 
-
-// 🔍 HAE YKSI
 const getOne = async (req, res) => {
   const { nimi, tyyppi, periodi, lukuvuosiId } = req.query
 
   try {
     if (!lukuvuosiId) return res.json([])
+    if (!req.kouluId) return res.json([])
 
     const objectId = new mongoose.Types.ObjectId(lukuvuosiId)
 
-    // hae kaikki periodin palkit
     const kaikki = await Lukujarjestys.find({
       tyyppi: "palkki",
       periodi: Number(periodi),
-      lukuvuosiId: objectId
+      lukuvuosiId: objectId,
+      kouluId: req.kouluId
     })
 
     res.json(kaikki)
@@ -60,7 +62,6 @@ const getOne = async (req, res) => {
   }
 }
 
-// 💾 UPSERT
 const save = async (req, res) => {
   const { nimi, tyyppi, periodi, lukuvuosiId, tunnit, irrotetut } = req.body
 
@@ -68,15 +69,20 @@ const save = async (req, res) => {
     return res.status(400).json({ error: 'Puuttuvia tietoja' })
   }
 
+  if (!req.kouluId) {
+    return res.status(400).json({
+      error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).' })
+  }
+
   try {
     const objectId = new mongoose.Types.ObjectId(lukuvuosiId)
 
     const paivitetty = await Lukujarjestys.findOneAndUpdate(
-      { nimi, tyyppi, periodi, lukuvuosiId: objectId },
+      { nimi, tyyppi, periodi, lukuvuosiId: objectId, kouluId: req.kouluId },
       {
         $set: {
-          tunnit: tunnit || []
-          // irrotetut poistettu!
+          tunnit: tunnit || [],
+          kouluId: req.kouluId
         }
       },
       { new: true, upsert: true, runValidators: true }

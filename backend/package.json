@@ -34,9 +34,13 @@
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-async-errors": "^3.1.1",
+    "express-session": "^1.19.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.12.1",
     "morgan": "^1.10.0",
+    "passport": "^0.7.0",
+    "passport-microsoft": "^2.1.0",
+    "resend": "^6.9.4",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
