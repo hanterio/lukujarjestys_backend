@@ -32,8 +32,10 @@ const mongoose = require('mongoose')
 mongoose.set('strictQuery', false)
 
 const url = config.MONGODB_URI
+// Älä koskaan logaa täyttä URI:ta — salasana vuotaa tuotantolokeihin.
+const mongoUriForLog = url.replace(/:([^:@]+)@/, ':***@')
 
-logger.info('connecting to', url)
+logger.info('connecting to', mongoUriForLog)
 mongoose.connect(url)
   .then(() => {
     console.log('connected to MongoDB')
