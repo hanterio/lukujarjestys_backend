@@ -25,7 +25,8 @@ const optimointiRouter = require('./routes/optimointi')
 const session = require('express-session')
 const passport = require('./controllers/microsoftAuth')
 const jwt = require('jsonwebtoken')
-const magicLinkRouter = require('./controllers/magicLink')
+const kayttajaAuthRouter = require('./controllers/kayttajaAuth')
+const kouluRouter = require('./controllers/koulu')
 const superadminRouter = require('./controllers/superadmin')
 const mongoose = require('mongoose')
 
@@ -69,9 +70,10 @@ app.use('/info', infoRouter)
 app.use('/api/login', loginRouter)
 app.use('/api/aineet', aineetRouter)
 app.use('/api/lukujarjestykset', middleware.flexUserExtractor, lukujarjestysRouter)
-app.use('/api/lukuvuosi', lukuvuosiRouter)
+app.use('/api/lukuvuosi', middleware.flexUserExtractor, lukuvuosiRouter)
 app.use('/api/optimointi', middleware.flexUserExtractor, optimointiRouter)
-app.use('/api/magiclink', magicLinkRouter)
+app.use('/api/kayttaja', kayttajaAuthRouter)
+app.use('/api/koulu', middleware.flexUserExtractor, kouluRouter)
 app.use('/api/superadmin', superadminRouter)
 
 app.get('/api/auth/microsoft',
@@ -82,14 +84,23 @@ app.get('/api/auth/microsoft/callback',
   async (req, res) => {
     const user = req.user
     const Kayttaja = require('./models/kayttaja')
+    const Koulu = require('./models/koulu')
+    const { generateUniqueTrialNimi } = require('./utils/kouluTrial')
 
     // Etsi tai luo käyttäjä
     let kayttaja = await Kayttaja.findOne({ email: user.email })
     if (!kayttaja) {
+      const nimi = await generateUniqueTrialNimi()
+      const koulu = await Koulu.create({
+        nimi,
+        tila: 'kokeilu',
+        kokeiluLoppuu: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      })
       kayttaja = await Kayttaja.create({
         email: user.email,
         nimi: user.nimi,
-        rooli: 'teacher'
+        rooli: 'school_admin',
+        koulu: koulu._id
       })
     }
 

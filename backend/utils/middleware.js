@@ -45,7 +45,6 @@ const flexUserExtractor = async (request, response, next) => {
 
   try {
     const decodedToken = jwt.verify(token, process.env.SECRET)
-    console.log('decoded token:', decodedToken) // ← lisää tämä
     // Uusi käyttäjä (rooli-kenttä tokenissa)
     if (decodedToken.rooli) {
       const kayttaja = await Kayttaja.findById(decodedToken.id).populate('koulu')
@@ -53,7 +52,8 @@ const flexUserExtractor = async (request, response, next) => {
         return response.status(401).json({ error: 'user not found' })
       }
       request.user = kayttaja
-      request.kouluId = kayttaja.koulu?._id
+      const kref = kayttaja.koulu
+      request.kouluId = kref ? (kref._id || kref) : undefined
 
       // Superadmin voi valita koulun näkymän (frontend lähettää otsakkeen)
       if (kayttaja.rooli === 'superadmin') {
@@ -119,11 +119,42 @@ const adminOnly = (request, response, next) => {
   next()
 }
 
+/** Lukuvuoden luonti / tuonti: Microsoft-Kayttaja (school_admin, superadmin) tai vanha Opettaja-admin. */
+const requireKouluHallinta = (request, response, next) => {
+  const r = request.user?.rooli
+  if (r === 'superadmin' || r === 'school_admin') {
+    return next()
+  }
+  if (request.user?.admin === true) {
+    return next()
+  }
+  return response.status(403).json({ error: 'vain koulun hallinto' })
+}
+
+const { getKouluTila } = require('./kouluRequest')
+
+/** Estää kirjoitukset, jos käyttäjän koulu on merkitty poistetuksi (superadmin ohitetaan). */
+const requireKouluEiPoistettu = async (request, response, next) => {
+  if (request.user?.rooli === 'superadmin') {
+    return next()
+  }
+  const tila = await getKouluTila(request)
+  if (tila === 'poistettu') {
+    return response.status(403).json({
+      error:
+        'Koulu on merkitty poistetuksi. Kirjaudu ulos tai pyydä ylläpitäjää palauttamaan koulu kokeiluun.'
+    })
+  }
+  next()
+}
+
 module.exports = {
   requestLogger,
   unknownEndpoint,
   errorHandler,
   userExtractor,
   adminOnly,
-  flexUserExtractor
+  flexUserExtractor,
+  requireKouluHallinta,
+  requireKouluEiPoistettu
 }

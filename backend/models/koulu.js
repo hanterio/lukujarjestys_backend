@@ -11,6 +11,13 @@ const kouluSchema = new mongoose.Schema({
   },
   kokeiluAlkoi: { type: Date, default: Date.now },
   kokeiluLoppuu: Date,
+  /** Luodaan aktivoinnissa; opettajat liittyvät tällä 6-merkkisellä tunnuksella */
+  aktivointitunnus: { type: String, sparse: true, unique: true },
+  /** Koulukohtainen aktiivinen lukuvuosi (kurssit, tuonti). Puuttuessa käytetään legacy-globaalia ACTIVE-merkintää ja migroidaan lazy. */
+  aktiivinenLukuvuosiId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lukuvuosi',
+  },
 })
 
 // Luodaan automaattinen tunniste ennen tallennusta

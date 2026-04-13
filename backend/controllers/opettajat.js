@@ -73,6 +73,7 @@ opettajatRouter.get('/:id',
 
 opettajatRouter.delete('/:id',
   middleware.flexUserExtractor,
+  middleware.requireKouluEiPoistettu,
   ensureAdmin,
   async (request, response, next) => {
     try {
@@ -93,6 +94,7 @@ opettajatRouter.delete('/:id',
 
 opettajatRouter.post('/',
   middleware.flexUserExtractor,
+  middleware.requireKouluEiPoistettu,
   ensureAdmin,
   async (request, response) => {
     const { opettaja, opv, password } = request.body
@@ -125,6 +127,7 @@ opettajatRouter.post('/',
 
 opettajatRouter.put('/:id',
   middleware.flexUserExtractor,
+  middleware.requireKouluEiPoistettu,
   ensureAdmin,
   async (request, response, next) => {
     try {
@@ -156,6 +159,7 @@ opettajatRouter.put('/:id',
 
 opettajatRouter.put('/:id/password',
   middleware.flexUserExtractor,
+  middleware.requireKouluEiPoistettu,
   ensureAdmin,
   async (request, response, next) => {
     try {

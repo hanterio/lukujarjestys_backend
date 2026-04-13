@@ -39,10 +39,24 @@ router.put('/koulut/:id/aktivoi', vaatiSuperadmin, async (req, res) => {
   res.json(koulu)
 })
 
-// Poista koulu
+// Poista koulu (pehmeä poisto)
 router.delete('/koulut/:id', vaatiSuperadmin, async (req, res) => {
   await Koulu.findByIdAndUpdate(req.params.id, { tila: 'poistettu' })
   res.json({ message: 'Koulu poistettu' })
+})
+
+// Palauta poistettu koulu kokeiluun (käyttäjät näkevät taas kokeilunäkymän)
+router.put('/koulut/:id/palauta', vaatiSuperadmin, async (req, res) => {
+  const k = await Koulu.findById(req.params.id)
+  if (!k) {
+    return res.status(404).json({ error: 'Koulua ei löydy' })
+  }
+  if (k.tila !== 'poistettu') {
+    return res.status(400).json({ error: 'Vain poistettu koulu voidaan palauttaa kokeiluun' })
+  }
+  k.tila = 'kokeilu'
+  await k.save()
+  res.json(k)
 })
 
 module.exports = router

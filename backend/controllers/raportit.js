@@ -1,13 +1,13 @@
 const ExcelJS = require('exceljs')
 const Kurssi = require('../models/kurssi')
-const Lukuvuosi = require('../models/lukuvuosi')
+const { getEffectiveLukuvuosiForRequest } = require('../utils/effectiveLukuvuosi')
 
 const OPETTAJA_SUMMA_VARI = 'FFD9EAF7'   // vaaleansininen (ARGB)
 const AINERYHMA_SUMMA_VARI = 'FFE2F0D9'  // vaaleanvihreä (ARGB)
 
 const opettajaOpetusmaaraExcel = async (req, res) => {
 
-  const aktiivinen = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+  const { effective: aktiivinen } = await getEffectiveLukuvuosiForRequest(req)
 
   if (!aktiivinen) {
     return res.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
@@ -254,10 +254,8 @@ const opettajaOpetusmaaraExcel = async (req, res) => {
 const opettajienKokonaistyomaaraExcel = async (req, res) => {
   const Kurssi = require('../models/kurssi')
   const Tehtava = require('../models/tehtava')
-  const Lukuvuosi = require('../models/lukuvuosi')
   const ExcelJS = require('exceljs')
-
-  const aktiivinen = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+  const { effective: aktiivinen } = await getEffectiveLukuvuosiForRequest(req)
 
   if (!aktiivinen) {
     return res.status(500).json({ error: 'Ei aktiivista lukuvuotta' })

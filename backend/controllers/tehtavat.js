@@ -9,6 +9,10 @@ const omaKouluId = '69cc1858f37f1373e6e237ba'
 tehtavatRouter.get('/',
   middleware.flexUserExtractor,
   (request, response, next) => {
+    if (request.user?.rooli === 'teacher' && !request.kouluId) {
+      return response.json([])
+    }
+
     const kouluId = request.kouluId?.toString()
     const onSuperadmin = request.user?.rooli === 'superadmin'
 
@@ -42,7 +46,7 @@ tehtavatRouter.get('/:_id', (request, response, next) => {
     .catch(error => next(error))
 })
 
-tehtavatRouter.delete('/:_id', (request, response, next) => {
+tehtavatRouter.delete('/:_id', middleware.requireKouluEiPoistettu, (request, response, next) => {
   Tehtava.findByIdAndDelete(request.params._id)
     .then(() => {
       response.status(204).end()
@@ -50,7 +54,7 @@ tehtavatRouter.delete('/:_id', (request, response, next) => {
     .catch(error => next(error))
 })
 
-tehtavatRouter.post('/', (request, response, next) => {
+tehtavatRouter.post('/', middleware.requireKouluEiPoistettu, (request, response, next) => {
   const body = request.body
 
   if (!body.kuvaus) {
@@ -71,7 +75,7 @@ tehtavatRouter.post('/', (request, response, next) => {
     .catch(error => next(error))
 })
 
-tehtavatRouter.put('/:_id', (request, response, next) => {
+tehtavatRouter.put('/:_id', middleware.requireKouluEiPoistettu, (request, response, next) => {
   logger.info('PUT-pyyntö vastaanotettu ID:llä:', request.params._id);
   logger.info('Body data:', request.body)
 

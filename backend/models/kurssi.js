@@ -30,7 +30,9 @@ const kurssiSchema = new mongoose.Schema({
   kouluId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Koulu'
-  }
+  },
+  /** Sama tunniste usealla kurssilla: VVT lasketaan kerran ryhmästä (max vvt). Tyhjä = ei ryhmää. */
+  vvtRyhmaId: { type: String, default: null }
 })
 
 
