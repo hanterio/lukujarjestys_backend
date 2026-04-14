@@ -5,6 +5,24 @@ const { getKouluTila } = require('../utils/kouluRequest')
 const { getEffectiveLukuvuosiForRequest } = require('../utils/effectiveLukuvuosi')
 const mongoose = require('mongoose')
 
+const parseAineId = (value) => {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+  if (typeof value === 'object') {
+    const candidate = value.$oid ?? value._id ?? value.id
+    if (candidate && mongoose.Types.ObjectId.isValid(candidate)) {
+      return candidate
+    }
+    return null
+  }
+  return mongoose.Types.ObjectId.isValid(value) ? value : null
+}
+
+const parseRequiredAineId = (value) => {
+  const aineId = parseAineId(value)
+  return aineId ? String(aineId) : null
+}
+
 let kurssiCache = null
 let kurssiCacheTime = 0
 
@@ -82,6 +100,12 @@ kurssitRouter.post('/tuonti', requireKouluHallinta, requireKouluEiPoistettu, asy
       if (!body || !body.nimi) {
         continue
       }
+      const aineId = parseRequiredAineId(body.aineId)
+      if (!aineId) {
+        return response.status(400).json({
+          error: `Kurssilta "${body.nimi}" puuttuu oppiaine (aineId).`,
+        })
+      }
       const kurssi = new Kurssi({
         nimi: body.nimi,
         aste: body.aste || 'lukio',
@@ -95,10 +119,8 @@ kurssitRouter.post('/tuonti', requireKouluHallinta, requireKouluEiPoistettu, asy
         vvtRyhmaId: body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
           ? String(body.vvtRyhmaId).trim()
           : null,
+        aineId,
       })
-      if (body.aineId && mongoose.Types.ObjectId.isValid(body.aineId)) {
-        kurssi.aineId = body.aineId
-      }
       await kurssi.save()
       luotu += 1
     }
@@ -175,6 +197,10 @@ kurssitRouter.post('/', requireKouluEiPoistettu, async (request, response, next)
   if (!aktiivinenVuosi) {
     return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
   }
+  const aineId = parseRequiredAineId(body.aineId)
+  if (!aineId) {
+    return response.status(400).json({ error: 'Kurssilta puuttuu oppiaine (aineId).' })
+  }
   const kurssi = new Kurssi({
     nimi: body.nimi,
     aste: body.aste,
@@ -188,10 +214,8 @@ kurssitRouter.post('/', requireKouluEiPoistettu, async (request, response, next)
     vvtRyhmaId: body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
       ? String(body.vvtRyhmaId).trim()
       : null,
+    aineId,
   })
-  if (body.aineId && mongoose.Types.ObjectId.isValid(body.aineId)) {
-    kurssi.aineId = body.aineId
-  }
   const savedKurssi = await kurssi.save()
   kurssiCache = null
   request.app.get('io').emit('kurssitPaivitetty')
@@ -222,9 +246,13 @@ kurssitRouter.put('/:id', requireKouluEiPoistettu, async (request, response, nex
     kurssi.opettaja = body.opettaja
     kurssi.opetus = body.opetus
     if (body.aineId !== undefined) {
-      kurssi.aineId = body.aineId && mongoose.Types.ObjectId.isValid(body.aineId)
-        ? body.aineId
-        : null
+      const aineId = parseRequiredAineId(body.aineId)
+      if (!aineId) {
+        return response.status(400).json({
+          error: 'Kurssilta puuttuu oppiaine (aineId).',
+        })
+      }
+      kurssi.aineId = aineId
     }
     if (body.vvtRyhmaId !== undefined) {
       kurssi.vvtRyhmaId = body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
