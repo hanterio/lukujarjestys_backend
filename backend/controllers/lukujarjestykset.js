@@ -4,6 +4,12 @@ const Lukujarjestys = require('../models/lukujarjestys')
 
 const tarkistaKonflikti = async (req, res) => {
   const { paiva, tunti, periodi, lukuvuosiId } = req.query
+  const ignorePalkkiKey = String(req.query.ignorePalkkiKey || '').trim()
+  const ignoreKurssiIdt = String(req.query.ignoreKurssiIdt || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const ignoreSet = new Set(ignoreKurssiIdt)
 
   if (!req.kouluId) {
     return res.json({ varatutKurssiIdt: [] })
@@ -14,8 +20,8 @@ const tarkistaKonflikti = async (req, res) => {
       periodi: Number(periodi),
       lukuvuosiId: new mongoose.Types.ObjectId(lukuvuosiId),
       kouluId: req.kouluId,
-      "tunnit.paiva": paiva,
-      "tunnit.tunti": Number(tunti)
+      'tunnit.paiva': paiva,
+      'tunnit.tunti': Number(tunti)
     })
 
     const varatutKurssiIdt = []
@@ -24,9 +30,18 @@ const tarkistaKonflikti = async (req, res) => {
         .filter(t => t.paiva === paiva && t.tunti === Number(tunti))
         .forEach(t => {
           t.kurssit.forEach(k => {
-            varatutKurssiIdt.push(k.kurssiId)
+            if (ignorePalkkiKey && k.palkkiKey === ignorePalkkiKey) {
+              return
+            }
+            if (!ignoreSet.has(k.kurssiId)) {
+              varatutKurssiIdt.push(k.kurssiId)
+            }
             if (k.yhdistetytIdt) {
-              varatutKurssiIdt.push(...k.yhdistetytIdt)
+              k.yhdistetytIdt.forEach((id) => {
+                if (!ignoreSet.has(id)) {
+                  varatutKurssiIdt.push(id)
+                }
+              })
             }
           })
         })
