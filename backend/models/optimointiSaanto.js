@@ -13,7 +13,7 @@ const optimointiSaantoSchema = new mongoose.Schema({
   },
   ruleType: {
     type: String,
-    enum: ['max_aine_parallel', 'va_palkki_paivan_loppuun'],
+    enum: ['max_aine_parallel', 'va_palkki_paivan_loppuun', 'tasaa_luokan_paivakuormat'],
     required: true
   },
   params: {

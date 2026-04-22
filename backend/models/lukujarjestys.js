@@ -17,6 +17,28 @@ const tuntiSchema = new mongoose.Schema({
   kurssit: [kurssiSijoitusSchema]
 }, { _id: false })
 
+const optimointiAsetusSchema = new mongoose.Schema({
+  laita: { type: Boolean, default: false },
+  tupla: {
+    type: String,
+    enum: ['default', 'prefer', 'avoid'],
+    default: 'default'
+  },
+  ristiriitaRatkaisu: {
+    type: String,
+    enum: ['prefer_double', 'prefer_single'],
+    default: 'prefer_double'
+  },
+  kurssiAsetukset: [{
+    kurssiId: { type: String, required: true },
+    tupla: {
+      type: String,
+      enum: ['default', 'prefer', 'avoid'],
+      default: 'default'
+    }
+  }]
+}, { _id: false })
+
 const lukujarjestysSchema = new mongoose.Schema({
   nimi: { type: String, required: true },
   tyyppi: {
@@ -35,7 +57,16 @@ const lukujarjestysSchema = new mongoose.Schema({
     ref: 'Koulu',
     required: true
   },
-  tunnit: [tuntiSchema]
+  tunnit: [tuntiSchema],
+  optimointiAsetus: {
+    type: optimointiAsetusSchema,
+    default: () => ({
+      laita: false,
+      tupla: 'default',
+      ristiriitaRatkaisu: 'prefer_double',
+      kurssiAsetukset: []
+    })
+  }
 }, { timestamps: true })
 
 lukujarjestysSchema.index(

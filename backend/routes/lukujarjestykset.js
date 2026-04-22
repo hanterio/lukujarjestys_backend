@@ -11,5 +11,6 @@ router.get('/', controller.getOne)
 
 // 💾 tallenna
 router.post('/', middleware.requireKouluEiPoistettu, controller.save)
+router.post('/optimointi-asetukset', middleware.requireKouluEiPoistettu, controller.saveOptimointiAsetukset)
 
 module.exports = router

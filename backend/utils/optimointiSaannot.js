@@ -21,12 +21,23 @@ const DEFAULT_RULE_TEMPLATES = [
     params: {},
     severity: 'hard',
     message: 'VA-palkit sijoitetaan päivän loppuun.'
+  },
+  {
+    enabled: true,
+    ruleType: 'tasaa_luokan_paivakuormat',
+    params: { painokerroin: 72, varoituskynnys: 0.3, raakaPainokerroin: 32 },
+    severity: 'soft',
+    message: 'Tasoita luokkakohtainen tuntikuorma eri päiville (lyhyet päivät huomioiden).'
   }
 ]
 
 const ruleDisplayName = (rule) => {
   if (rule.ruleType === 'va_palkki_paivan_loppuun') {
     return 'VA-palkit päivän loppuun'
+  }
+  if (rule.ruleType === 'tasaa_luokan_paivakuormat') {
+    const p = Number(rule.params?.painokerroin ?? 72)
+    return `Luokan päiväkuorma (paino ${p})`
   }
   const aineNimi = rule.params?.aineNimi || 'aine'
   const maxParallel = Number(rule.params?.maxParallel || 0)
@@ -43,10 +54,38 @@ const normalizeRule = (rule) => ({
   updatedBy: rule.updatedBy || ''
 })
 
+const PAIVAT_EVAL = ['ma', 'ti', 'ke', 'to', 'pe']
+const SLOTIT_EVAL = {
+  ma: [1, 2, 3, 4, 5],
+  ti: [1, 2, 3, 4, 5],
+  ke: [1, 2, 3, 4],
+  to: [1, 2, 3, 4, 5],
+  pe: [1, 2, 3, 4, 5]
+}
+
+const laskeLuokanPaivanKuormaEval = (sijoitukset, luokka, paiva) => {
+  return SLOTIT_EVAL[paiva].filter((s) => {
+    const avain = `${paiva}-${s}`
+    return (sijoitukset[avain] || []).some((k) => k.luokat?.includes(luokka))
+  }).length
+}
+
+const laskeLuokanPaivaUtilSpread = (sijoitukset, luokka) => {
+  const paivaKuormat = PAIVAT_EVAL.map((paiva) => laskeLuokanPaivanKuormaEval(sijoitukset, luokka, paiva))
+  const indeksit = PAIVAT_EVAL.map((_, i) => i).filter((i) => paivaKuormat[i] > 0)
+  if (indeksit.length < 2) return 0
+  const utils = indeksit.map((i) => {
+    const paiva = PAIVAT_EVAL[i]
+    const maxS = SLOTIT_EVAL[paiva].length
+    return maxS ? paivaKuormat[i] / maxS : 0
+  })
+  return Math.max(...utils) - Math.min(...utils)
+}
+
 const validateRulePayload = (payload) => {
   const errors = []
   const ruleType = payload.ruleType
-  if (!['max_aine_parallel', 'va_palkki_paivan_loppuun'].includes(ruleType)) {
+  if (!['max_aine_parallel', 'va_palkki_paivan_loppuun', 'tasaa_luokan_paivakuormat'].includes(ruleType)) {
     errors.push('Tuntematon ruleType')
   }
 
@@ -65,6 +104,27 @@ const validateRulePayload = (payload) => {
     normalizedParams = {
       aineNimi,
       maxParallel: Math.floor(maxParallel)
+    }
+  }
+
+  if (ruleType === 'tasaa_luokan_paivakuormat') {
+    const params = payload.params || {}
+    const painokerroin = Number(params.painokerroin ?? 72)
+    const varoituskynnys = Number(params.varoituskynnys ?? 0.3)
+    const raakaPainokerroin = Number(params.raakaPainokerroin ?? 32)
+    if (!Number.isFinite(painokerroin) || painokerroin < 1) {
+      errors.push('params.painokerroin pitää olla luku >= 1')
+    }
+    if (!Number.isFinite(varoituskynnys) || varoituskynnys < 0 || varoituskynnys > 1) {
+      errors.push('params.varoituskynnys pitää olla luku välillä 0–1')
+    }
+    if (!Number.isFinite(raakaPainokerroin) || raakaPainokerroin < 0 || raakaPainokerroin > 200) {
+      errors.push('params.raakaPainokerroin pitää olla luku välillä 0–200')
+    }
+    normalizedParams = {
+      painokerroin: Math.round(painokerroin),
+      varoituskynnys: Math.round(varoituskynnys * 1000) / 1000,
+      raakaPainokerroin: Math.round(raakaPainokerroin)
     }
   }
 
@@ -93,6 +153,7 @@ const ensureDefaultRulesForKoulu = async (kouluId) => {
     String(r.params?.aineNimi || '').toLowerCase() === aineNimi.toLowerCase()
   )
   const hasVaEndRule = current.some((r) => r.ruleType === 'va_palkki_paivan_loppuun')
+  const hasTasaaRule = current.some((r) => r.ruleType === 'tasaa_luokan_paivakuormat')
 
   const toInsert = []
   if (!hasMaxAineRule('kotitalous')) {
@@ -103,6 +164,9 @@ const ensureDefaultRulesForKoulu = async (kouluId) => {
   }
   if (!hasVaEndRule) {
     toInsert.push(DEFAULT_RULE_TEMPLATES[2])
+  }
+  if (!hasTasaaRule) {
+    toInsert.push(DEFAULT_RULE_TEMPLATES[3])
   }
 
   if (toInsert.length > 0) {
@@ -240,6 +304,32 @@ const evaluateRulesAgainstSijoitukset = ({
       })
   })
 
+  rules
+    .filter((r) => r.enabled && r.ruleType === 'tasaa_luokan_paivakuormat')
+    .forEach((rule) => {
+      const kynnys = Number(rule.params?.varoituskynnys ?? 0.35)
+      const luokat = [...new Set(
+        kurssitData
+          .filter((k) => k.aste !== 'lukio')
+          .flatMap((k) => k.luokka || [])
+      )]
+      luokat.forEach((luokka) => {
+        const spread = laskeLuokanPaivaUtilSpread(sijoitukset, luokka)
+        if (spread > kynnys) {
+          violations.push({
+            ruleId: rule.id,
+            ruleType: rule.ruleType,
+            severity: rule.severity,
+            label: ruleDisplayName(rule),
+            luokka,
+            spread: Math.round(spread * 1000) / 1000,
+            threshold: kynnys,
+            message: rule.message || ''
+          })
+        }
+      })
+    })
+
   return violations
 }
 
@@ -249,6 +339,7 @@ module.exports = {
   ensureDefaultRulesForKoulu,
   evaluateRulesAgainstSijoitukset,
   haeKoulunSaannot,
+  laskeLuokanPaivaUtilSpread,
   normalizeRule,
   ruleDisplayName,
   validateRulePayload

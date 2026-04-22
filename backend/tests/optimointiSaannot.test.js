@@ -3,7 +3,8 @@ const assert = require('node:assert')
 const {
   checkHardConstraintsForPlacement,
   evaluateRulesAgainstSijoitukset,
-  validateRulePayload
+  validateRulePayload,
+  laskeLuokanPaivaUtilSpread
 } = require('../utils/optimointiSaannot')
 
 describe('optimointisaantojen validointi', () => {
@@ -24,6 +25,18 @@ describe('optimointisaantojen validointi', () => {
       params: { aineNimi: '', maxParallel: 0 }
     })
     assert.strictEqual(result.valid, false)
+  })
+
+  test('hyväksyy tasaa_luokan_paivakuormat payloadin', () => {
+    const result = validateRulePayload({
+      ruleType: 'tasaa_luokan_paivakuormat',
+      params: { painokerroin: 72, varoituskynnys: 0.3, raakaPainokerroin: 32 },
+      severity: 'soft',
+      enabled: true
+    })
+    assert.strictEqual(result.valid, true)
+    assert.strictEqual(result.normalized.params.painokerroin, 72)
+    assert.strictEqual(result.normalized.params.raakaPainokerroin, 32)
   })
 })
 
@@ -98,5 +111,38 @@ describe('valmiin lukujarjestyksen rikeraportti', () => {
     assert.strictEqual(violations.length, 1)
     assert.strictEqual(violations[0].maxParallel, 2)
     assert.strictEqual(violations[0].currentParallel, 3)
+  })
+
+  test('raportoi luokan päiväkuorman epätasaisuudesta', () => {
+    const rules = [{
+      id: 'r2',
+      enabled: true,
+      ruleType: 'tasaa_luokan_paivakuormat',
+      params: { painokerroin: 48, varoituskynnys: 0.2 },
+      severity: 'soft',
+      message: ''
+    }]
+    const aineet = []
+    const kurssitData = [{ _id: 'k1', aste: 'ylakoulu', luokka: ['7B'] }]
+    const sijoitukset = {
+      'ti-1': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ti-2': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ti-3': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ti-4': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ti-5': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ke-1': [{ kurssiId: 'k1', luokat: ['7B'] }],
+      'ke-2': [{ kurssiId: 'k1', luokat: ['7B'] }]
+    }
+
+    const spread = laskeLuokanPaivaUtilSpread(sijoitukset, '7B')
+    assert.ok(spread > 0.2)
+
+    const violations = evaluateRulesAgainstSijoitukset({
+      sijoitukset,
+      rules,
+      aineet,
+      kurssitData
+    })
+    assert.ok(violations.some((v) => v.ruleType === 'tasaa_luokan_paivakuormat' && v.luokka === '7B'))
   })
 })
