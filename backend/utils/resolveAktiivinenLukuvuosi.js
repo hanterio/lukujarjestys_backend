@@ -2,6 +2,11 @@ const mongoose = require('mongoose')
 const Koulu = require('../models/koulu')
 const Lukuvuosi = require('../models/lukuvuosi')
 
+async function haeLegacyAktiivinenLukuvuosi() {
+  // Vanhassa mallissa voi olla useita ACTIVE-rivejä; käytetään aina uusinta.
+  return Lukuvuosi.findOne({ status: 'ACTIVE' }).sort({ createdAt: -1 })
+}
+
 /**
  * Palauttaa aktiivisen lukuvuosi-dokumentin.
  * - Jos kouluId on annettu: ensisijaisesti koulun `aktiivinenLukuvuosiId`, muuten lazy-migraatio
@@ -12,21 +17,35 @@ const Lukuvuosi = require('../models/lukuvuosi')
  */
 async function getAktiivinenLukuvuosiForKoulu(kouluId) {
   if (!kouluId) {
-    return Lukuvuosi.findOne({ status: 'ACTIVE' })
+    return haeLegacyAktiivinenLukuvuosi()
   }
 
   if (!mongoose.Types.ObjectId.isValid(kouluId)) {
-    return Lukuvuosi.findOne({ status: 'ACTIVE' })
+    return haeLegacyAktiivinenLukuvuosi()
   }
 
   const kid = new mongoose.Types.ObjectId(kouluId)
-  const koulu = await Koulu.findById(kid).select('aktiivinenLukuvuosiId').lean()
+  const koulu = await Koulu.findById(kid).select('aktiivinenLukuvuosiId tila').lean()
   if (!koulu) {
-    return Lukuvuosi.findOne({ status: 'ACTIVE' })
+    return haeLegacyAktiivinenLukuvuosi()
+  }
+
+  // Kokeilukouluilla käytetään aina uusinta aktiivista lukuvuotta,
+  // jotta superadminin oletusnimen päivitys näkyy heti myös kokeilukäyttäjillä.
+  if (koulu.tila === 'kokeilu') {
+    const legacy = await haeLegacyAktiivinenLukuvuosi()
+    if (!legacy) return null
+    if (!koulu.aktiivinenLukuvuosiId || String(koulu.aktiivinenLukuvuosiId) !== String(legacy._id)) {
+      await Koulu.updateOne(
+        { _id: kid },
+        { $set: { aktiivinenLukuvuosiId: legacy._id } }
+      )
+    }
+    return legacy
   }
 
   if (!koulu.aktiivinenLukuvuosiId) {
-    const legacy = await Lukuvuosi.findOne({ status: 'ACTIVE' })
+    const legacy = await haeLegacyAktiivinenLukuvuosi()
     if (legacy) {
       await Koulu.updateOne(
         {
@@ -48,7 +67,7 @@ async function getAktiivinenLukuvuosiForKoulu(kouluId) {
     return doc
   }
 
-  return Lukuvuosi.findOne({ status: 'ACTIVE' })
+  return haeLegacyAktiivinenLukuvuosi()
 }
 
 module.exports = { getAktiivinenLukuvuosiForKoulu }

@@ -1,6 +1,6 @@
 const router = require('express').Router()
 const Koulu = require('../models/koulu')
-const Kayttaja = require('../models/kayttaja')
+const Lukuvuosi = require('../models/lukuvuosi')
 const jwt = require('jsonwebtoken')
 const config = require('../utils/config')
 
@@ -57,6 +57,35 @@ router.put('/koulut/:id/palauta', vaatiSuperadmin, async (req, res) => {
   k.tila = 'kokeilu'
   await k.save()
   res.json(k)
+})
+
+// Hae oletuslukuvuosi, joka näkyy uusille kokeilukäyttäjille
+router.get('/kokeilu-lukuvuosi', vaatiSuperadmin, async (req, res) => {
+  const lv = await Lukuvuosi.findOne({ status: 'ACTIVE' }).sort({ createdAt: -1 })
+  if (!lv) {
+    return res.status(404).json({ error: 'Aktiivista lukuvuotta ei löytynyt' })
+  }
+  res.json(lv)
+})
+
+// Päivitä oletuslukuvuoden nimi uusille kokeilukäyttäjille
+router.put('/kokeilu-lukuvuosi', vaatiSuperadmin, async (req, res) => {
+  const name = (req.body?.name || '').trim()
+  if (!name) {
+    return res.status(400).json({ error: 'Lukuvuoden nimi puuttuu' })
+  }
+
+  const lv = await Lukuvuosi.findOne({ status: 'ACTIVE' }).sort({ createdAt: -1 })
+  if (!lv) {
+    return res.status(404).json({ error: 'Aktiivista lukuvuotta ei löytynyt' })
+  }
+
+  // Pidetään ACTIVE-rivit keskenään samassa nimessä, jotta legacy-polut näyttävät saman otsikon.
+  await Lukuvuosi.updateMany({ status: 'ACTIVE' }, { $set: { name } })
+  // Varmistetaan että myös olemassa olevat kokeilukoulut osoittavat tähän aktiiviseen lukuvuoteen.
+  await Koulu.updateMany({ tila: 'kokeilu' }, { $set: { aktiivinenLukuvuosiId: lv._id } })
+  const paivitetty = await Lukuvuosi.findById(lv._id)
+  res.json(paivitetty)
 })
 
 module.exports = router
