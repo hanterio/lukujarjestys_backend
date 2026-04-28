@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <!-- Transparent background - no fill -->
+  
+  <!-- Main arch shape: thick rounded stroke forming an arch/hook -->
+  <path
+    d="M 120 440
+       L 120 240
+       Q 120 100 260 100
+       Q 400 100 400 240
+       L 400 310"
+    fill="none"
+    stroke="#1a3a2e"
+    stroke-width="68"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  
+  <!-- Orange dot at the end of the arch -->
+  <circle cx="400" cy="310" r="42" fill="#d95f2b" />
+</svg>
