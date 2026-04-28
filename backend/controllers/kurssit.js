@@ -1,8 +1,15 @@
 const kurssitRouter = require('express').Router()
 const Kurssi = require('../models/kurssi')
+const Opettaja = require('../models/opettaja')
 const { requireKouluHallinta, requireKouluEiPoistettu } = require('../utils/middleware')
 const { getKouluTila } = require('../utils/kouluRequest')
 const { getEffectiveLukuvuosiForRequest } = require('../utils/effectiveLukuvuosi')
+const {
+  KURRE_EXPORT_MAPPING_VERSION,
+  UNSUPPORTED_EXPORT_ITEMS,
+  validateExportData,
+  buildKurreCsv,
+} = require('../utils/kurreExport')
 const mongoose = require('mongoose')
 
 const parseAineId = (value) => {
@@ -160,6 +167,56 @@ kurssitRouter.delete(
     }
   }
 )
+
+kurssitRouter.post('/kurre-vienti', requireKouluHallinta, requireKouluEiPoistettu, async (request, response, next) => {
+  try {
+    if (!request.kouluId) {
+      return response.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
+    const include = {
+      type2: request.body?.include?.type2 !== false,
+      type4: request.body?.include?.type4 !== false,
+      type8: request.body?.include?.type8 !== false,
+    }
+    const { effective: aktiivinenVuosi } = await getEffectiveLukuvuosiForRequest(request)
+    if (!aktiivinenVuosi) {
+      return response.status(500).json({ error: 'Ei aktiivista lukuvuotta' })
+    }
+    const [kurssit, opettajat] = await Promise.all([
+      Kurssi.find({ kouluId: request.kouluId, lukuvuosiId: aktiivinenVuosi._id })
+        .populate({ path: 'aineId', strictPopulate: false })
+        .lean(),
+      Opettaja.find({ kouluId: request.kouluId }).lean(),
+    ])
+
+    const validointi = validateExportData(kurssit, opettajat)
+    const csv = buildKurreCsv({ kurssit, opettajat, include })
+    const kouluSlug = String(request.user?.koulu?.nimi || 'koulu')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const pvm = new Date().toISOString().slice(0, 10)
+    const filename = `kurre-vienti-${kouluSlug || 'koulu'}-${pvm}.csv`
+
+    return response.json({
+      filename,
+      csv,
+      mappingVersion: KURRE_EXPORT_MAPPING_VERSION,
+      include,
+      summary: {
+        kurssit: kurssit.length,
+        opettajat: opettajat.length,
+        rivit: csv ? csv.split(/\r?\n/).length : 0,
+      },
+      validointi,
+      unsupported: UNSUPPORTED_EXPORT_ITEMS,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
 
 kurssitRouter.get('/:id', async (request, response, next) => {
   const kurssi = await Kurssi
