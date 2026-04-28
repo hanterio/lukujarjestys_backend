@@ -3,6 +3,7 @@ const logger = require('./utils/logger')
 const express = require('express')
 require('express-async-errors')
 const app = express()
+const path = require('path')
 
 // Render / reverse proxy: luota ensimmäiseen proxyyn (HTTPS, Host) — tärkeää Passport/Microsoft OAuthille
 if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
@@ -121,6 +122,11 @@ app.get('/api/auth/microsoft/callback',
     res.redirect(`${config.FRONTEND_URL}/?token=${token}&nimi=${encodeURIComponent(user.nimi)}&rooli=${kayttaja.rooli}`)
   }
 )
+
+// SPA fallback: ohjaa kaikki ei-API-polut React-sovelluksen indexiin (esim. /landing-a).
+app.get(/^\/(?!api|info).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+})
 
 app.use(middleware.unknownEndpoint)
 app.use(middleware.errorHandler)
