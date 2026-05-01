@@ -1,0 +1,6 @@
+<svg width="1600" height="600" viewBox="0 0 1600 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="600" rx="36" fill="#153B37"/>
+  <path d="M347 113C300 113 260 130 234 156C208 182 201 214 221 240C239 264 271 275 300 286C332 298 355 309 355 334C355 361 328 380 289 380C252 380 219 362 197 336" stroke="#E6F0EC" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="385" cy="348" r="31" fill="#F07B3A"/>
+  <text x="500" y="342" fill="#E6F0EC" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="168" font-weight="700" letter-spacing="-2">SkolApp</text>
+</svg>

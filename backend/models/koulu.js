@@ -18,6 +18,11 @@ const kouluSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lukuvuosi',
   },
+  /** Kun true, tavalliset käyttäjät eivät voi muokata Kurssit-välilehden opettajatietoja. */
+  kurssitMuokkausLukittu: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 // Luodaan automaattinen tunniste ennen tallennusta

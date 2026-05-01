@@ -18,7 +18,11 @@ const tehtavaSchema = new mongoose.Schema({
   kouluId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Koulu'
-  }
+  },
+  lukuvuosiId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lukuvuosi',
+  },
 })
 
 module.exports = mongoose.model('Tehtava', tehtavaSchema)

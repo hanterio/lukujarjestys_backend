@@ -1,6 +1,7 @@
 const kurssitRouter = require('express').Router()
 const Kurssi = require('../models/kurssi')
 const Opettaja = require('../models/opettaja')
+const Koulu = require('../models/koulu')
 const { requireKouluHallinta, requireKouluEiPoistettu } = require('../utils/middleware')
 const { getKouluTila } = require('../utils/kouluRequest')
 const { getEffectiveLukuvuosiForRequest } = require('../utils/effectiveLukuvuosi')
@@ -32,6 +33,27 @@ const parseRequiredAineId = (value) => {
 
 let kurssiCache = null
 let kurssiCacheTime = 0
+
+const userVoiOhittaaKurssiLukituksen = (request) => {
+  const rooli = request.user?.rooli
+  return rooli === 'school_admin' || rooli === 'superadmin' || request.user?.admin === true
+}
+
+const blockIfKurssitMuokkausLukittu = async (request, response, next) => {
+  if (userVoiOhittaaKurssiLukituksen(request)) {
+    return next()
+  }
+  if (!request.kouluId) {
+    return next()
+  }
+  const koulu = await Koulu.findById(request.kouluId).select('kurssitMuokkausLukittu').lean()
+  if (koulu?.kurssitMuokkausLukittu) {
+    return response.status(403).json({
+      error: 'Kurssien muokkaus on lukittu tavallisilta käyttäjiltä.',
+    })
+  }
+  return next()
+}
 
 kurssitRouter.get('/', async (request, response, next) => {
   try {
@@ -230,7 +252,7 @@ kurssitRouter.get('/:id', async (request, response, next) => {
   }
 })
 
-kurssitRouter.delete('/:id', requireKouluEiPoistettu, async (request, response, next) => {
+kurssitRouter.delete('/:id', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu, async (request, response, next) => {
   await Kurssi.findByIdAndDelete(request.params.id)
   kurssiCache = null
 
@@ -239,7 +261,7 @@ kurssitRouter.delete('/:id', requireKouluEiPoistettu, async (request, response, 
   response.status(204).end()
 })
 
-kurssitRouter.post('/', requireKouluEiPoistettu, async (request, response, next) => {
+kurssitRouter.post('/', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu, async (request, response, next) => {
   const body = request.body
 
   if (!body.nimi) {
@@ -280,7 +302,7 @@ kurssitRouter.post('/', requireKouluEiPoistettu, async (request, response, next)
 })
 
 
-kurssitRouter.put('/:id', requireKouluEiPoistettu, async (request, response, next) => {
+kurssitRouter.put('/:id', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu, async (request, response, next) => {
   try {
     const body = request.body
 

@@ -15,11 +15,11 @@ const logger = require('../utils/logger')
 
 kouluRouter.get('/me', async (request, response) => {
   const u = request.user
-  if (!u.rooli) {
-    return response.status(400).json({ error: 'Vain Kayttaja-tili (ei opettajatunnusta)' })
-  }
   let k = u.koulu
   const kid = kouluObjectIdKayttajasta(u)
+  if (!k && request.kouluId) {
+    k = await Koulu.findById(request.kouluId).lean()
+  }
   if (kid && (!k || k.tila == null)) {
     k = await Koulu.findById(kid).lean()
   }
@@ -28,6 +28,7 @@ kouluRouter.get('/me', async (request, response) => {
         _id: k._id,
         nimi: k.nimi,
         tila: k.tila,
+        kurssitMuokkausLukittu: !!k.kurssitMuokkausLukittu,
         ...(k.tila === 'aktiivinen' && k.aktivointitunnus
           ? { aktivointitunnus: k.aktivointitunnus }
           : {})
@@ -70,12 +71,41 @@ kouluRouter.get('/me', async (request, response) => {
     needsLiity: u.rooli === 'teacher' && !u.koulu,
     needsKouluAktivointi: u.rooli === 'school_admin' && k && k.tila === 'kokeilu',
     kouluPoistettu,
+    kurssitMuokkausLukittu: !!k?.kurssitMuokkausLukittu,
     /** Koululle julkaistu lukuvuosi (opettajat näkevät tämän). */
     aktiivinenLukuvuosi,
     /** Kun hallinta käyttää esikatselua, eri kuin aktiivinenLukuvuosi. */
     esikatseluLukuvuosi,
   })
 })
+
+/** Kurssit-välilehden opettajamuokkauksen lukitus (school_admin / superadmin valitulle koululle). */
+kouluRouter.patch(
+  '/kurssit-lukittu',
+  middleware.requireKouluHallinta,
+  middleware.requireKouluEiPoistettu,
+  async (request, response) => {
+    const kid = request.kouluId
+    if (!kid) {
+      return response.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
+    const lukittu = request.body?.lukittu
+    if (typeof lukittu !== 'boolean') {
+      return response.status(400).json({ error: 'Boolean-kenttä "lukittu" vaaditaan.' })
+    }
+    const paivitetty = await Koulu.findByIdAndUpdate(
+      kid,
+      { kurssitMuokkausLukittu: lukittu },
+      { new: true, runValidators: true },
+    ).lean()
+    if (!paivitetty) {
+      return response.status(404).json({ error: 'Koulua ei löytynyt.' })
+    }
+    return response.json({ kurssitMuokkausLukittu: !!paivitetty.kurssitMuokkausLukittu })
+  },
+)
 
 kouluRouter.post('/aktivoi', middleware.requireKouluEiPoistettu, async (request, response) => {
   const u = request.user
