@@ -31,6 +31,31 @@ const parseRequiredAineId = (value) => {
   return aineId ? String(aineId) : null
 }
 
+/** Vain skeeman mukaiset opetus-rivit (ei kurreOsio, _id, …) — estää tallennusvirheet. */
+const sanitizeOpetusInput = (input) => {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((r) => {
+      if (!r || typeof r !== 'object') return null
+      const periodi = Number(r.periodi)
+      const tunnit_viikossa = Number(r.tunnit_viikossa)
+      const palkki = String(r.palkki ?? '').trim() || '1'
+      if (!Number.isFinite(periodi) || periodi < 1 || periodi > 5) return null
+      if (!Number.isFinite(tunnit_viikossa) || tunnit_viikossa < 0) return null
+      return { periodi, palkki, tunnit_viikossa }
+    })
+    .filter(Boolean)
+}
+
+const emitKurssitPaivitetty = (request) => {
+  try {
+    const io = request.app.get('io')
+    if (io && typeof io.emit === 'function') io.emit('kurssitPaivitetty')
+  } catch {
+    /* ei kaada tallennusta */
+  }
+}
+
 let kurssiCache = null
 let kurssiCacheTime = 0
 
@@ -154,7 +179,7 @@ kurssitRouter.post('/tuonti', requireKouluHallinta, requireKouluEiPoistettu, asy
       luotu += 1
     }
     kurssiCache = null
-    request.app.get('io').emit('kurssitPaivitetty')
+    emitKurssitPaivitetty(request)
     response.status(201).json({ luotu, yhteensa: rivit.length })
   } catch (error) {
     next(error)
@@ -182,7 +207,7 @@ kurssitRouter.delete(
         lukuvuosiId: aktiivinenVuosi._id,
       })
       kurssiCache = null
-      request.app.get('io').emit('kurssitPaivitetty')
+      emitKurssitPaivitetty(request)
       response.json({ poistettu: result.deletedCount })
     } catch (error) {
       next(error)
@@ -256,7 +281,7 @@ kurssitRouter.delete('/:id', requireKouluEiPoistettu, blockIfKurssitMuokkausLuki
   await Kurssi.findByIdAndDelete(request.params.id)
   kurssiCache = null
 
-  request.app.get('io').emit('kurssitPaivitetty')
+  emitKurssitPaivitetty(request)
 
   response.status(204).end()
 })
@@ -297,7 +322,7 @@ kurssitRouter.post('/', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu, 
   })
   const savedKurssi = await kurssi.save()
   kurssiCache = null
-  request.app.get('io').emit('kurssitPaivitetty')
+  emitKurssitPaivitetty(request)
   response.status(201).json(savedKurssi)
 })
 
@@ -343,7 +368,7 @@ kurssitRouter.put('/:id', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu
     kurssiCache = null
 
     // 🔥 LISÄÄ TÄMÄ
-    request.app.get('io').emit('kurssitPaivitetty')
+    emitKurssitPaivitetty(request)
     response.json(savedKurssi)
 
   } catch (error) {
@@ -373,7 +398,10 @@ kurssitRouter.patch('/:id', requireKouluHallinta, requireKouluEiPoistettu, async
     }
 
     if (body.opetus !== undefined) {
-      kurssi.opetus = body.opetus
+      if (!Array.isArray(body.opetus)) {
+        return response.status(400).json({ error: 'opetus pitää olla taulukko' })
+      }
+      kurssi.opetus = sanitizeOpetusInput(body.opetus)
     }
     if (body.vvtRyhmaId !== undefined) {
       kurssi.vvtRyhmaId = body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
@@ -386,7 +414,7 @@ kurssitRouter.patch('/:id', requireKouluHallinta, requireKouluEiPoistettu, async
 
     const savedKurssi = await kurssi.save()
     kurssiCache = null
-    request.app.get('io').emit('kurssitPaivitetty')
+    emitKurssitPaivitetty(request)
     response.json(savedKurssi)
   } catch (error) {
     next(error)
