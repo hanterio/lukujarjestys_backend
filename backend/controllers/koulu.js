@@ -12,6 +12,38 @@ const { kouluObjectIdKayttajasta } = require('../utils/kouluRequest')
 const { getAktiivinenLukuvuosiForKoulu } = require('../utils/resolveAktiivinenLukuvuosi')
 const { getEffectiveLukuvuosiForRequest } = require('../utils/effectiveLukuvuosi')
 const logger = require('../utils/logger')
+const viikonpaivat = ['ma', 'ti', 'ke', 'to', 'pe']
+
+const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/
+
+const normalizeAikatauluProfiili = (raw) => {
+  const normAste = (asteRaw) => {
+    const paivatIn = Array.isArray(asteRaw?.paivat) ? asteRaw.paivat : []
+    return {
+      paivat: paivatIn
+        .filter((p) => viikonpaivat.includes(String(p?.paiva || '')))
+        .map((p) => ({
+          paiva: p.paiva,
+          slotit: (Array.isArray(p.slotit) ? p.slotit : [])
+            .filter((s) => Number.isFinite(Number(s?.slot)))
+            .map((s) => ({
+              slot: Math.max(1, Math.floor(Number(s.slot))),
+              alkaa: String(s.alkaa || '').trim(),
+              loppuu: String(s.loppuu || '').trim(),
+              optimize: s.optimize !== false
+            }))
+            .filter((s) => HHMM_RE.test(s.alkaa) && HHMM_RE.test(s.loppuu))
+            .sort((a, b) => a.slot - b.slot)
+        }))
+        .sort((a, b) => viikonpaivat.indexOf(a.paiva) - viikonpaivat.indexOf(b.paiva))
+    }
+  }
+  return {
+    alakoulu: normAste(raw?.alakoulu),
+    ylakoulu: normAste(raw?.ylakoulu),
+    lukio: normAste(raw?.lukio)
+  }
+}
 
 kouluRouter.get('/me', async (request, response) => {
   const u = request.user
@@ -323,6 +355,49 @@ kouluRouter.patch(
     } catch (error) {
       next(error)
     }
+  }
+)
+
+kouluRouter.get(
+  '/aikataulu-profiili',
+  middleware.requireKouluHallinta,
+  middleware.requireKouluEiPoistettu,
+  async (request, response) => {
+    const kid = request.kouluId
+    if (!kid) {
+      return response.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
+    const koulu = await Koulu.findById(kid).select('aikatauluProfiili').lean()
+    return response.json(
+      koulu?.aikatauluProfiili || {
+        alakoulu: { paivat: [] },
+        ylakoulu: { paivat: [] },
+        lukio: { paivat: [] }
+      }
+    )
+  }
+)
+
+kouluRouter.patch(
+  '/aikataulu-profiili',
+  middleware.requireKouluHallinta,
+  middleware.requireKouluEiPoistettu,
+  async (request, response) => {
+    const kid = request.kouluId
+    if (!kid) {
+      return response.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
+    const profiili = normalizeAikatauluProfiili(request.body || {})
+    const paivitetty = await Koulu.findByIdAndUpdate(
+      kid,
+      { aikatauluProfiili: profiili },
+      { new: true, runValidators: true }
+    ).select('aikatauluProfiili').lean()
+    return response.json(paivitetty?.aikatauluProfiili || profiili)
   }
 )
 

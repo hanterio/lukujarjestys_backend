@@ -29,6 +29,7 @@ const optimointiAsetusSchema = new mongoose.Schema({
     enum: ['prefer_double', 'prefer_single'],
     default: 'prefer_double'
   },
+  splitPrioriteetti: { type: Boolean, default: false },
   kurssiAsetukset: [{
     kurssiId: { type: String, required: true },
     tupla: {
@@ -64,6 +65,7 @@ const lukujarjestysSchema = new mongoose.Schema({
       laita: false,
       tupla: 'default',
       ristiriitaRatkaisu: 'prefer_double',
+      splitPrioriteetti: false,
       kurssiAsetukset: []
     })
   }

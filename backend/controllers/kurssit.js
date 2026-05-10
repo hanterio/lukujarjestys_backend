@@ -31,16 +31,58 @@ const parseRequiredAineId = (value) => {
   return aineId ? String(aineId) : null
 }
 
+const PERIODI_REGEX = /^(\d+)\s*([A-Za-zÅÄÖåäö]*)$/
+
+const normalizePeriodi = (raw) => {
+  const s = String(raw ?? '').trim()
+  const m = s.match(PERIODI_REGEX)
+  if (!m) return null
+  const runko = String(Number(m[1]))
+  if (!runko || runko === '0') return null
+  const suffix = String(m[2] || '').toUpperCase()
+  return `${runko}${suffix}`
+}
+
 /** Vain skeeman mukaiset opetus-rivit (ei kurreOsio, _id, …) — estää tallennusvirheet. */
+/**
+ * Flat opettaja + valinnainen ryhmittely. Ryppäiden täytyy peittää täsmälleen flat-lista (kukin opettaja kerran).
+ */
+const sanitizeOpettajaJaRyppaat = (flatInput, ryppaatInput) => {
+  const flat = Array.isArray(flatInput)
+    ? [...new Set(flatInput.map((x) => String(x).trim().toUpperCase()).filter(Boolean))]
+    : []
+  if (!Array.isArray(ryppaatInput) || ryppaatInput.length === 0) {
+    return { opettaja: flat, opettajaRyppaat: undefined }
+  }
+  const bundles = ryppaatInput
+    .map((b) =>
+      (Array.isArray(b) ? b : [b])
+        .map((x) => String(x).trim().toUpperCase())
+        .filter(Boolean)
+    )
+    .filter((b) => b.length > 0)
+  const rykat = bundles.flat().sort()
+  const ref = [...flat].sort()
+  if (rykat.length !== ref.length) {
+    return { opettaja: flat, opettajaRyppaat: undefined }
+  }
+  for (let i = 0; i < ref.length; i += 1) {
+    if (rykat[i] !== ref[i]) {
+      return { opettaja: flat, opettajaRyppaat: undefined }
+    }
+  }
+  return { opettaja: flat, opettajaRyppaat: bundles }
+}
+
 const sanitizeOpetusInput = (input) => {
   if (!Array.isArray(input)) return []
   return input
     .map((r) => {
       if (!r || typeof r !== 'object') return null
-      const periodi = Number(r.periodi)
+      const periodi = normalizePeriodi(r.periodi)
       const tunnit_viikossa = Number(r.tunnit_viikossa)
       const palkki = String(r.palkki ?? '').trim() || '1'
-      if (!Number.isFinite(periodi) || periodi < 1 || periodi > 5) return null
+      if (!periodi) return null
       if (!Number.isFinite(tunnit_viikossa) || tunnit_viikossa < 0) return null
       return { periodi, palkki, tunnit_viikossa }
     })
@@ -167,7 +209,7 @@ kurssitRouter.post('/tuonti', requireKouluHallinta, requireKouluEiPoistettu, asy
         vvt: body.vvt != null ? String(body.vvt) : '',
         opiskelijat: body.opiskelijat != null ? String(body.opiskelijat) : '',
         opettaja: Array.isArray(body.opettaja) ? body.opettaja.map(String) : [],
-        opetus: Array.isArray(body.opetus) ? body.opetus : [],
+        opetus: sanitizeOpetusInput(body.opetus),
         lukuvuosiId: aktiivinenVuosi._id,
         kouluId: request.kouluId,
         vvtRyhmaId: body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
@@ -305,14 +347,19 @@ kurssitRouter.post('/', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu, 
   if (!aineId) {
     return response.status(400).json({ error: 'Kurssilta puuttuu oppiaine (aineId).' })
   }
+  const { opettaja: opFromBody, opettajaRyppaat: ryFromBody } = sanitizeOpettajaJaRyppaat(
+    body.opettaja,
+    body.opettajaRyppaat
+  )
   const kurssi = new Kurssi({
     nimi: body.nimi,
     aste: body.aste,
     luokka: body.luokka,
     vvt: body.vvt,
     opiskelijat: body.opiskelijat,
-    opettaja: body.opettaja,
-    opetus: body.opetus,
+    opettaja: opFromBody,
+    opettajaRyppaat: ryFromBody,
+    opetus: sanitizeOpetusInput(body.opetus),
     lukuvuosiId: aktiivinenVuosi._id,
     kouluId: request.kouluId,
     vvtRyhmaId: body.vvtRyhmaId && String(body.vvtRyhmaId).trim()
@@ -347,8 +394,13 @@ kurssitRouter.put('/:id', requireKouluEiPoistettu, blockIfKurssitMuokkausLukittu
     kurssi.luokka = body.luokka
     kurssi.vvt = body.vvt
     kurssi.opiskelijat = body.opiskelijat
-    kurssi.opettaja = body.opettaja
-    kurssi.opetus = body.opetus
+    const { opettaja: opPut, opettajaRyppaat: ryPut } = sanitizeOpettajaJaRyppaat(
+      body.opettaja,
+      body.opettajaRyppaat
+    )
+    kurssi.opettaja = opPut
+    kurssi.opettajaRyppaat = ryPut
+    kurssi.opetus = sanitizeOpetusInput(body.opetus)
     if (body.aineId !== undefined) {
       const aineId = parseRequiredAineId(body.aineId)
       if (!aineId) {
@@ -408,8 +460,15 @@ kurssitRouter.patch('/:id', requireKouluHallinta, requireKouluEiPoistettu, async
         ? String(body.vvtRyhmaId).trim()
         : null
     }
-    if (body.opettaja !== undefined) {
-      kurssi.opettaja = Array.isArray(body.opettaja) ? body.opettaja : []
+    if (body.opettaja !== undefined || body.opettajaRyppaat !== undefined) {
+      const flatSrc = body.opettaja !== undefined ? body.opettaja : kurssi.opettaja
+      const rySrc = body.opettajaRyppaat !== undefined ? body.opettajaRyppaat : undefined
+      const { opettaja: opPatch, opettajaRyppaat: ryPatch } = sanitizeOpettajaJaRyppaat(
+        flatSrc,
+        rySrc
+      )
+      kurssi.opettaja = opPatch
+      kurssi.opettajaRyppaat = ryPatch
     }
 
     const savedKurssi = await kurssi.save()

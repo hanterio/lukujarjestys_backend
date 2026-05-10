@@ -2,10 +2,10 @@ const mongoose = require('mongoose')
 const Lukujarjestys = require('../models/lukujarjestys')
 const Kurssi = require('../models/kurssi')
 const Aine = require('../models/aine')
+const Koulu = require('../models/koulu')
 const {
   checkHardConstraintsForPlacement,
-  evaluateRulesAgainstSijoitukset,
-  haeKoulunSaannot
+  evaluateRulesAgainstSijoitukset
 } = require('../utils/optimointiSaannot')
 
 // ─── VAKIOT ──────────────────────────────────────────────────
@@ -17,6 +17,249 @@ const SLOTIT = {
   to: [1, 2, 3, 4, 5],
   pe: [1, 2, 3, 4, 5]
 }
+
+const sijoitusIntervalMapRef = new WeakMap()
+const sijoitusDebugStatsRef = new WeakMap()
+
+const normalizeAste = (asteRaw) => {
+  const s = String(asteRaw || '').toLowerCase()
+  if (s.includes('lukio')) return 'lukio'
+  if (s.includes('ala')) return 'alakoulu'
+  return 'ylakoulu'
+}
+
+const parseHHMM = (hhmm) => {
+  const m = String(hhmm || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  if (!m) return null
+  return Number(m[1]) * 60 + Number(m[2])
+}
+
+const buildIntervalMapFromScheduleProfile = (profile) => {
+  const map = {}
+  ;['alakoulu', 'ylakoulu', 'lukio'].forEach((aste) => {
+    map[aste] = {}
+    const paivat = profile?.[aste]?.paivat || []
+    paivat.forEach((p) => {
+      const paiva = p?.paiva
+      if (!paiva) return
+      map[aste][paiva] = map[aste][paiva] || {}
+      ;(p.slotit || []).forEach((s) => {
+        const slot = Number(s?.slot)
+        const alku = parseHHMM(s?.alkaa)
+        const loppu = parseHHMM(s?.loppuu)
+        if (!Number.isFinite(slot) || alku == null || loppu == null) return
+        map[aste][paiva][slot] = { start: alku, end: loppu, optimize: s.optimize !== false }
+      })
+    })
+  })
+  return map
+}
+
+const defaultIntervalForSlot = (slot) => {
+  const s = Number(slot)
+  return { start: s * 100, end: s * 100 + 50, optimize: true }
+}
+
+const getIntervalFor = (intervalMap, aste, paiva, slot) => {
+  const a = normalizeAste(aste)
+  return intervalMap?.[a]?.[paiva]?.[Number(slot)] || defaultIntervalForSlot(slot)
+}
+
+const intervalsOverlap = (a, b) => a.start < b.end && b.start < a.end
+
+const initDebugStats = () => ({
+  teacherCrossSlotOverlapBlocks: 0,
+  classCrossSlotOverlapBlocks: 0
+})
+
+const listaaHardConflictit = ({ sijoitukset, intervalMap }) => {
+  const byDay = {}
+  Object.entries(sijoitukset || {}).forEach(([avain, solu]) => {
+    const [paiva, tuntiStr] = String(avain).split('-')
+    const tunti = Number(tuntiStr)
+    if (!paiva || !Number.isFinite(tunti)) return
+    const blockMap = new Map()
+    ;(solu || []).forEach((e) => {
+      const pk = kanoninenPalkkiAvain(e.palkkiKey)
+      if (!pk) return
+      if (!blockMap.has(pk)) {
+        blockMap.set(pk, {
+          paiva,
+          tunti,
+          palkkiKey: pk,
+          aste: e.aste || 'ylakoulu',
+          opettajat: new Set(),
+          luokat: new Set()
+        })
+      }
+      const g = blockMap.get(pk)
+      ;(e.opettajat || []).forEach((o) => g.opettajat.add(o))
+      ;(e.luokat || []).forEach((l) => g.luokat.add(l))
+    })
+    if (!byDay[paiva]) byDay[paiva] = []
+    blockMap.forEach((g) => {
+      byDay[paiva].push({
+        ...g,
+        opettajat: [...g.opettajat],
+        luokat: [...g.luokat]
+      })
+    })
+  })
+
+  const teacher = []
+  const luokka = []
+  Object.entries(byDay).forEach(([paiva, groups]) => {
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const a = groups[i]
+        const b = groups[j]
+        if (a.palkkiKey === b.palkkiKey) continue
+        const ia = getIntervalFor(intervalMap, a.aste || 'ylakoulu', paiva, a.tunti)
+        const ib = getIntervalFor(intervalMap, b.aste || 'ylakoulu', paiva, b.tunti)
+        if (!intervalsOverlap(ia, ib)) continue
+
+        a.opettajat.forEach((o) => {
+          if (b.opettajat.includes(o)) {
+            teacher.push({
+              paiva,
+              tuntiA: a.tunti,
+              tuntiB: b.tunti,
+              opettaja: o,
+              palkkiA: a.palkkiKey,
+              palkkiB: b.palkkiKey
+            })
+          }
+        })
+        a.luokat.forEach((l) => {
+          if (b.luokat.includes(l)) {
+            luokka.push({
+              paiva,
+              tuntiA: a.tunti,
+              tuntiB: b.tunti,
+              luokka: l,
+              palkkiA: a.palkkiKey,
+              palkkiB: b.palkkiKey
+            })
+          }
+        })
+      }
+    }
+  })
+
+  const uniqBy = (arr, keyFn) => {
+    const seen = new Set()
+    const out = []
+    arr.forEach((x) => {
+      const k = keyFn(x)
+      if (seen.has(k)) return
+      seen.add(k)
+      out.push(x)
+    })
+    return out
+  }
+
+  const byDayBlock = new Map()
+  Object.entries(byDay).forEach(([paiva, groups]) => {
+    groups.forEach((g) => {
+      const k = `${paiva}|${g.palkkiKey}`
+      if (!byDayBlock.has(k)) byDayBlock.set(k, new Set())
+      byDayBlock.get(k).add(g.tunti)
+    })
+  })
+  const sameBlock = []
+  byDayBlock.forEach((setti, key) => {
+    const [paiva, palkkiKey] = key.split('|')
+    const tunnit = [...setti].sort((a, b) => a - b)
+    const isAdjacentPair =
+      tunnit.length === 2 &&
+      Math.abs(Number(tunnit[1]) - Number(tunnit[0])) === 1
+    const isProblem =
+      tunnit.length > 2 ||
+      (tunnit.length === 2 && !isAdjacentPair)
+    if (isProblem) sameBlock.push({ paiva, palkkiKey, tunnit })
+  })
+
+  return {
+    teacherConflicts: uniqBy(teacher, (x) => [x.paiva, x.tuntiA, x.tuntiB, x.opettaja, x.palkkiA, x.palkkiB].join('|')),
+    classConflicts: uniqBy(luokka, (x) => [x.paiva, x.tuntiA, x.tuntiB, x.luokka, x.palkkiA, x.palkkiB].join('|')),
+    sameBlockPerDay: uniqBy(sameBlock, (x) => [x.paiva, x.palkkiKey, (x.tunnit || []).join(',')].join('|'))
+  }
+}
+
+const arvioiTuplaToiveet = ({ sijoitukset, optimointiAsetukset }) => {
+  const slotitByPalkki = new Map()
+  Object.entries(sijoitukset || {}).forEach(([avain, solu]) => {
+    const [paiva, tuntiStr] = String(avain).split('-')
+    const tunti = Number(tuntiStr)
+    if (!paiva || !Number.isFinite(tunti)) return
+    ;(solu || []).forEach((e) => {
+      const pk = kanoninenPalkkiAvain(e.palkkiKey)
+      if (!pk) return
+      if (!slotitByPalkki.has(pk)) slotitByPalkki.set(pk, new Map())
+      const paivaMap = slotitByPalkki.get(pk)
+      if (!paivaMap.has(paiva)) paivaMap.set(paiva, new Set())
+      paivaMap.get(paiva).add(tunti)
+    })
+  })
+
+  const out = []
+  Object.entries(optimointiAsetukset || {}).forEach(([palkkiKey, asetus]) => {
+    const coursePrefer = Array.isArray(asetus?.kurssiAsetukset) &&
+      asetus.kurssiAsetukset.some((k) => k?.tupla === 'prefer')
+    const requested = asetus?.tupla === 'prefer' || coursePrefer
+    if (!requested) return
+    const paivaMap = slotitByPalkki.get(palkkiKey) || new Map()
+    let fulfilled = false
+    paivaMap.forEach((slotSet) => {
+      const s = [...slotSet].sort((a, b) => a - b)
+      for (let i = 0; i < s.length - 1; i++) {
+        if (Math.abs(Number(s[i + 1]) - Number(s[i])) === 1) {
+          fulfilled = true
+          break
+        }
+      }
+    })
+    out.push({
+      palkkiKey,
+      requested: true,
+      fulfilled
+    })
+  })
+  return out
+}
+
+const HARDCODED_CONSTRAINTS = [
+  {
+    key: 'teacher_conflict',
+    title: 'Ei opettajakonfliktia samassa ajassa',
+    description: 'Sama opettaja ei voi olla päällekkäisissä sloteissa.'
+  },
+  {
+    key: 'class_conflict',
+    title: 'Ei luokkakonfliktia samassa ajassa',
+    description: 'Sama luokka ei voi olla päällekkäisissä sloteissa.'
+  },
+  {
+    key: 'same_block_per_day',
+    title: 'Sama palkki vain kerran päivässä',
+    description: 'Sama palkkiKey pyritään pitämään yhdessä slotissa per päivä.'
+  },
+  {
+    key: 'edge_definition',
+    title: 'Laitatunti-määritelmä',
+    description: 'Yksittäinen = päivän eka/vika, tupla = päivän kaksi ekaa tai kaksi vikaa.'
+  },
+  {
+    key: 'gap_minimization',
+    title: 'Hyppytuntien minimointi',
+    description: 'Gap-fix ja polish-vaiheet vähentävät välitunteja yläkoulussa.'
+  },
+  {
+    key: 'unit_difficulty_sorting',
+    title: 'Vaikeat yksiköt ensin',
+    description: 'Useita opettajia/luokkia sisältävät yksiköt sijoitetaan ensin.'
+  }
+]
 
 const kaikkiTuntipaikat = () => {
   const paikat = []
@@ -65,7 +308,8 @@ const rakennaPaivaPalkkiIndex = (sijoitukset) => {
     if (!index.has(paiva)) index.set(paiva, new Set())
     const setti = index.get(paiva)
     ;(solu || []).forEach((k) => {
-      if (k.palkkiKey) setti.add(k.palkkiKey)
+      const canonical = kanoninenPalkkiAvain(k.palkkiKey)
+      if (canonical) setti.add(canonical)
     })
   })
   return index
@@ -95,27 +339,78 @@ const virtuaaliPalkkiAvainYhdelleKurssille = (palkkiKey, kurssi) => {
 // ─── KONFLIKTITARKISTUKSET ───────────────────────────────────
 const onOpettajaKonflikti = (sijoitukset, opettajat, paiva, tunti) => {
   if (!opettajat || opettajat.length === 0) return false
-  const avain = `${paiva}-${tunti}`
-  const solu = sijoitukset[avain] || []
-  return solu.some(k => k.opettajat?.some(o => opettajat.includes(o)))
+  const intervalMap = sijoitusIntervalMapRef.get(sijoitukset)
+  if (!intervalMap) {
+    const avain = `${paiva}-${tunti}`
+    const solu = sijoitukset[avain] || []
+    return solu.some(k => k.opettajat?.some(o => opettajat.includes(o)))
+  }
+
+  const candidateInterval = getIntervalFor(intervalMap, 'ylakoulu', paiva, tunti)
+  const currentSlot = Number(tunti)
+  let crossSlotOverlapHit = false
+  const found = Object.entries(sijoitukset).some(([avain, solu]) => {
+    const [slotPaiva, slotTuntiStr] = avain.split('-')
+    if (slotPaiva !== paiva) return false
+    const slotTunti = Number(slotTuntiStr)
+    const existingList = Array.isArray(solu) ? solu : []
+    return existingList.some((k) => {
+      const existingInterval = getIntervalFor(intervalMap, k.aste || 'ylakoulu', slotPaiva, slotTunti)
+      if (!intervalsOverlap(candidateInterval, existingInterval)) return false
+      const teacherMatch = k.opettajat?.some((o) => opettajat.includes(o))
+      if (teacherMatch && slotTunti !== currentSlot) crossSlotOverlapHit = true
+      return teacherMatch
+    })
+  })
+  if (found && crossSlotOverlapHit) {
+    const stats = sijoitusDebugStatsRef.get(sijoitukset)
+    if (stats) stats.teacherCrossSlotOverlapBlocks += 1
+  }
+  return found
 }
 
 const onLuokkaKonflikti = (sijoitukset, luokat, paiva, tunti) => {
   if (!luokat || luokat.length === 0) return false
-  const avain = `${paiva}-${tunti}`
-  const solu = sijoitukset[avain] || []
-  return solu.some(k => k.luokat?.some(l => luokat.includes(l)))
+  const intervalMap = sijoitusIntervalMapRef.get(sijoitukset)
+  if (!intervalMap) {
+    const avain = `${paiva}-${tunti}`
+    const solu = sijoitukset[avain] || []
+    return solu.some(k => k.luokat?.some(l => luokat.includes(l)))
+  }
+
+  const candidateInterval = getIntervalFor(intervalMap, 'ylakoulu', paiva, tunti)
+  const currentSlot = Number(tunti)
+  let crossSlotOverlapHit = false
+  const found = Object.entries(sijoitukset).some(([avain, solu]) => {
+    const [slotPaiva, slotTuntiStr] = avain.split('-')
+    if (slotPaiva !== paiva) return false
+    const slotTunti = Number(slotTuntiStr)
+    const existingList = Array.isArray(solu) ? solu : []
+    return existingList.some((k) => {
+      const existingInterval = getIntervalFor(intervalMap, k.aste || 'ylakoulu', slotPaiva, slotTunti)
+      if (!intervalsOverlap(candidateInterval, existingInterval)) return false
+      const classMatch = k.luokat?.some((l) => luokat.includes(l))
+      if (classMatch && slotTunti !== currentSlot) crossSlotOverlapHit = true
+      return classMatch
+    })
+  })
+  if (found && crossSlotOverlapHit) {
+    const stats = sijoitusDebugStatsRef.get(sijoitukset)
+    if (stats) stats.classCrossSlotOverlapBlocks += 1
+  }
+  return found
 }
 
 const onPalkkiJoSamanaPaivana = (sijoitukset, palkkiKey, paiva, paivaPalkkiIndex = null) => {
   if (!palkkiKey) return false
+  const canonicalTarget = kanoninenPalkkiAvain(palkkiKey)
   if (paivaPalkkiIndex) {
-    return paivaPalkkiIndex.get(paiva)?.has(palkkiKey) || false
+    return paivaPalkkiIndex.get(paiva)?.has(canonicalTarget) || false
   }
   return Object.entries(sijoitukset).some(([avain, solu]) => {
     const [slotPaiva] = avain.split('-')
     if (slotPaiva !== paiva) return false
-    return (solu || []).some((k) => k.palkkiKey === palkkiKey)
+    return (solu || []).some((k) => kanoninenPalkkiAvain(k.palkkiKey) === canonicalTarget)
   })
 }
 
@@ -147,6 +442,10 @@ const simuloiSijoitus = (sijoitukset, yksikko, paikat) => {
   Object.entries(sijoitukset).forEach(([key, value]) => {
     kopio[key] = [...value]
   })
+  const intervalMap = sijoitusIntervalMapRef.get(sijoitukset)
+  if (intervalMap) sijoitusIntervalMapRef.set(kopio, intervalMap)
+  const stats = sijoitusDebugStatsRef.get(sijoitukset)
+  if (stats) sijoitusDebugStatsRef.set(kopio, stats)
 
   paikat.forEach(({ paiva, tunti }) => {
     const avain = `${paiva}-${tunti}`
@@ -158,7 +457,8 @@ const simuloiSijoitus = (sijoitukset, yksikko, paikat) => {
         palkkiKey: yksikko.palkkiKey,
         yhdistetytIdt: null,
         opettajat: kurssi.opettaja || [],
-        luokat: kurssi.luokka || []
+        luokat: kurssi.luokka || [],
+        aste: normalizeAste(kurssi.aste)
       })
     })
   })
@@ -347,6 +647,10 @@ const kloonaaSijoitukset = (sijoitukset) => {
   Object.entries(sijoitukset).forEach(([k, v]) => {
     kopio[k] = [...v]
   })
+  const intervalMap = sijoitusIntervalMapRef.get(sijoitukset)
+  if (intervalMap) sijoitusIntervalMapRef.set(kopio, intervalMap)
+  const stats = sijoitusDebugStatsRef.get(sijoitukset)
+  if (stats) sijoitusDebugStatsRef.set(kopio, stats)
   return kopio
 }
 
@@ -370,6 +674,57 @@ const laskeKaikkiAukot = (sijoitukset, luokat) => {
     })
   })
   return aukot
+}
+
+const listaaLuokkaPaivaAukot = (sijoitukset, luokat) => {
+  const rivit = []
+  luokat.forEach((luokka) => {
+    PAIVAT.forEach((paiva) => {
+      const aukot = laskeLuokanPaivanAukot(sijoitukset, luokka, paiva)
+      if (aukot > 0) rivit.push({ luokka, paiva, aukot })
+    })
+  })
+  rivit.sort((a, b) => b.aukot - a.aukot || String(a.luokka).localeCompare(String(b.luokka)) || String(a.paiva).localeCompare(String(b.paiva)))
+  return rivit
+}
+
+const valitseSplitTargetitBudgetilla = ({
+  candidates,
+  luokkaSlackByName
+}) => {
+  const remaining = {}
+  Object.entries(luokkaSlackByName || {}).forEach(([luokka, slack]) => {
+    remaining[luokka] = Math.max(0, Number(slack || 0))
+  })
+  const sorted = [...(candidates || [])].sort((a, b) => {
+    if (Boolean(a.splitPrioriteetti) !== Boolean(b.splitPrioriteetti)) {
+      return a.splitPrioriteetti ? -1 : 1
+    }
+    if (Number(a.minSlack || 0) !== Number(b.minSlack || 0)) {
+      return Number(a.minSlack || 0) - Number(b.minSlack || 0)
+    }
+    return String(a.palkkiKey).localeCompare(String(b.palkkiKey))
+  })
+
+  const selected = []
+  const skipped = []
+  sorted.forEach((c) => {
+    const luokat = Array.isArray(c.luokat) ? c.luokat : []
+    const ok = luokat.length > 0 && luokat.every((l) => Number(remaining[l] || 0) >= 1)
+    if (!ok) {
+      skipped.push({
+        palkkiKey: c.palkkiKey,
+        splitPrioriteetti: c.splitPrioriteetti === true,
+        minSlack: Number(c.minSlack || 0),
+        reason: 'class_budget_exhausted'
+      })
+      return
+    }
+    luokat.forEach((l) => { remaining[l] = Number(remaining[l] || 0) - 1 })
+    selected.push(c)
+  })
+
+  return { selected, skipped, remaining }
 }
 
 const laskeLuokanKaikkiAukot = (sijoitukset, luokka) => {
@@ -445,9 +800,19 @@ const haeKonfliktoivatPalkitSlotista = (sijoitukset, paiva, tunti, entries) => {
     .map(([key, arr]) => ({ palkkiKey: key, entries: arr }))
 }
 
-const voikoNoudattaaVaLaitaa = (palkkiKey, paiva, tunti, vaPalkkiPaivanLoppuun) => {
-  if (!vaPalkkiPaivanLoppuun) return true
-  if (!String(palkkiKey || '').toUpperCase().includes('VA')) return true
+const voikoNoudattaaPalkkiLaitaa = (
+  palkkiKey,
+  paiva,
+  tunti,
+  vaPalkkiPaivanLoppuun,
+  optimointiAsetukset = {}
+) => {
+  const canonical = kanoninenPalkkiAvain(palkkiKey)
+  const asetus = optimointiAsetukset?.[canonical] || {}
+  const vaatiiLaita =
+    asetus?.laita === true ||
+    (vaPalkkiPaivanLoppuun && String(canonical || '').toUpperCase().includes('VA'))
+  if (!vaatiiLaita) return true
   return onPaivanLaitaTunti(paiva, tunti)
 }
 
@@ -463,6 +828,7 @@ const yritaSijoittaaKetjusiirrolla = ({
   saannot,
   aineet,
   vaPalkkiPaivanLoppuun,
+  optimointiAsetukset,
   depth,
   visitedPalkit,
   deadlineMs
@@ -471,7 +837,7 @@ const yritaSijoittaaKetjusiirrolla = ({
   if (deadlineMs && Date.now() > deadlineMs) return null
   if (depth < 0) return null
   if (visitedPalkit.has(movingPalkkiKey)) return null
-  if (!voikoNoudattaaVaLaitaa(movingPalkkiKey, targetPaiva, targetTunti, vaPalkkiPaivanLoppuun)) return null
+  if (!voikoNoudattaaPalkkiLaitaa(movingPalkkiKey, targetPaiva, targetTunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) return null
   if (onPalkkiJoSamanaPaivana(sijoitukset, movingPalkkiKey, targetPaiva, paivaPalkkiIndex)) return null
 
   if (voikoPalkinSijoittaaSlotiin({
@@ -504,7 +870,7 @@ const yritaSijoittaaKetjusiirrolla = ({
     if (nextVisited.has(blocker.palkkiKey)) continue
     for (const alt of mahdollisetRuudut) {
       if (alt.paiva === targetPaiva && alt.tunti === targetTunti) continue
-      if (!voikoNoudattaaVaLaitaa(blocker.palkkiKey, alt.paiva, alt.tunti, vaPalkkiPaivanLoppuun)) continue
+      if (!voikoNoudattaaPalkkiLaitaa(blocker.palkkiKey, alt.paiva, alt.tunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) continue
 
       const temp = kloonaaSijoitukset(sijoitukset)
       poistaPalkkiSlotista(temp, targetPaiva, targetTunti, blocker.palkkiKey)
@@ -520,6 +886,7 @@ const yritaSijoittaaKetjusiirrolla = ({
         saannot,
         aineet,
         vaPalkkiPaivanLoppuun,
+        optimointiAsetukset,
         depth: depth - 1,
         visitedPalkit: nextVisited,
         deadlineMs
@@ -551,7 +918,8 @@ const ajaHardGapKorjaus = ({
   aineet,
   periodi,
   vaPalkkiPaivanLoppuun,
-  mahdollisetRuudut
+  mahdollisetRuudut,
+  optimointiAsetukset
 }) => {
   const luokat = haeYlaLuokatPeriodille(kurssitData, periodi)
   const kurssiMap = rakennaKurssiMap(kurssitData)
@@ -604,6 +972,7 @@ const ajaHardGapKorjaus = ({
             saannot,
             aineet,
             vaPalkkiPaivanLoppuun,
+            optimointiAsetukset,
             depth: chainDepth,
             visitedPalkit: new Set(),
             deadlineMs
@@ -654,7 +1023,8 @@ const ajaPaivakuormanTasapainotus = ({
   aineet,
   periodi,
   vaPalkkiPaivanLoppuun,
-  mahdollisetRuudut
+  mahdollisetRuudut,
+  optimointiAsetukset
 }) => {
   const tasaa = (saannot || []).find((r) => r.enabled && r.ruleType === 'tasaa_luokan_paivakuormat')
   if (!tasaa) return
@@ -714,9 +1084,7 @@ const ajaPaivakuormanTasapainotus = ({
 
           for (const { tunti: targetTunti } of targetPaikat) {
             if (Date.now() > deadlineMs) break
-            if (vaPalkkiPaivanLoppuun && String(palkkiKey).toUpperCase().includes('VA')) {
-              if (!onPaivanLaitaTunti(minP, targetTunti)) continue
-            }
+            if (!voikoNoudattaaPalkkiLaitaa(palkkiKey, minP, targetTunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) continue
 
             const temp = kloonaaSijoitukset(sijoitukset)
             temp[sourceKey] = (temp[sourceKey] || []).filter((k) => k.palkkiKey !== palkkiKey)
@@ -770,7 +1138,8 @@ const ajaGapFix = ({
   aineet,
   periodi,
   vaPalkkiPaivanLoppuun,
-  mahdollisetRuudut
+  mahdollisetRuudut,
+  optimointiAsetukset
 }) => {
   const luokat = haeYlaLuokatPeriodille(kurssitData, periodi)
   const kurssiMap = rakennaKurssiMap(kurssitData)
@@ -804,10 +1173,7 @@ const ajaGapFix = ({
               const siirrettavat = sourceSolu.filter((k) => k.palkkiKey === palkkiKey)
               if (siirrettavat.length === 0) continue
 
-              if (vaPalkkiPaivanLoppuun && String(palkkiKey).toUpperCase().includes('VA')) {
-                const onLaita = onPaivanLaitaTunti(paiva, targetTunti)
-                if (!onLaita) continue
-              }
+              if (!voikoNoudattaaPalkkiLaitaa(palkkiKey, paiva, targetTunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) continue
 
               const temp = kloonaaSijoitukset(sijoitukset)
               temp[sourceKey] = (temp[sourceKey] || []).filter((k) => k.palkkiKey !== palkkiKey)
@@ -870,7 +1236,8 @@ const ajaSingleGapPolish = ({
   aineet,
   periodi,
   vaPalkkiPaivanLoppuun,
-  mahdollisetRuudut
+  mahdollisetRuudut,
+  optimointiAsetukset
 }) => {
   const luokat = haeYlaLuokatPeriodille(kurssitData, periodi)
   const kurssiMap = rakennaKurssiMap(kurssitData)
@@ -934,9 +1301,7 @@ const ajaSingleGapPolish = ({
         const siirrettavat = sourceSolu.filter((e) => e.palkkiKey === palkkiKey)
         if (siirrettavat.length === 0) continue
 
-        if (vaPalkkiPaivanLoppuun && String(palkkiKey).toUpperCase().includes('VA')) {
-          if (!onPaivanLaitaTunti(target.paiva, target.tunti)) continue
-        }
+        if (!voikoNoudattaaPalkkiLaitaa(palkkiKey, target.paiva, target.tunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) continue
 
         const temp = kloonaaSijoitukset(sijoitukset)
         temp[sourceKey] = (temp[sourceKey] || []).filter((e) => e.palkkiKey !== palkkiKey)
@@ -1007,6 +1372,105 @@ const ajaSingleGapPolish = ({
       }
       if (onnistui) break
     }
+  }
+}
+
+const ajaKohdennettuAukkoKorjaus = ({
+  sijoitukset,
+  kurssitData,
+  saannot,
+  aineet,
+  periodi,
+  mahdollisetRuudut,
+  vaPalkkiPaivanLoppuun,
+  optimointiAsetukset
+}) => {
+  const luokat = haeYlaLuokatPeriodille(kurssitData, periodi)
+  const kurssiMap = rakennaKurssiMap(kurssitData)
+  const sallittuSet = new Set((mahdollisetRuudut || []).map((p) => `${p.paiva}-${p.tunti}`))
+  const aukkoRivit = listaaLuokkaPaivaAukot(sijoitukset, luokat)
+  if (aukkoRivit.length === 0) {
+    return { changed: false, reason: 'no_gaps' }
+  }
+
+  const totalBefore = laskeKaikkiAukot(sijoitukset, luokat)
+  let best = null
+
+  aukkoRivit.slice(0, 6).forEach(({ luokka, paiva, aukot }) => {
+    const targetTunnit = haePaivanAukkotunnit(sijoitukset, luokka, paiva)
+      .filter((tunti) => sallittuSet.has(`${paiva}-${tunti}`))
+    if (targetTunnit.length === 0) return
+
+    const sourceTunnit = SLOTIT[paiva].filter((tunti) => {
+      if (targetTunnit.includes(tunti)) return false
+      const avain = `${paiva}-${tunti}`
+      return (sijoitukset[avain] || []).some((e) => e.luokat?.includes(luokka))
+    })
+
+    targetTunnit.forEach((targetTunti) => {
+      sourceTunnit.forEach((srcTunti) => {
+        const sourceKey = `${paiva}-${srcTunti}`
+        const sourceSolu = sijoitukset[sourceKey] || []
+        const palkit = [...new Set(
+          sourceSolu
+            .filter((e) => e.luokat?.includes(luokka))
+            .map((e) => e.palkkiKey)
+            .filter(Boolean)
+        )]
+
+        palkit.forEach((palkkiKey) => {
+          if (!voikoNoudattaaPalkkiLaitaa(palkkiKey, paiva, targetTunti, vaPalkkiPaivanLoppuun, optimointiAsetukset)) return
+          const movingEntries = sourceSolu.filter((e) => e.palkkiKey === palkkiKey)
+          if (movingEntries.length === 0) return
+
+          const temp = kloonaaSijoitukset(sijoitukset)
+          poistaPalkkiSlotista(temp, paiva, srcTunti, palkkiKey)
+          const paivaPalkkiIndex = rakennaPaivaPalkkiIndex(temp)
+          if (onPalkkiJoSamanaPaivana(temp, palkkiKey, paiva, paivaPalkkiIndex)) return
+
+          if (!voikoPalkinSijoittaaSlotiin({
+            sijoitukset: temp,
+            paiva,
+            tunti: targetTunti,
+            entries: movingEntries,
+            kurssiMap,
+            kurssitData,
+            saannot,
+            aineet
+          })) return
+
+          lisaaSlotiin(temp, paiva, targetTunti, movingEntries)
+          const totalAfter = laskeKaikkiAukot(temp, luokat)
+          const classDayAfter = laskeLuokanPaivanAukot(temp, luokka, paiva)
+          if (totalAfter >= totalBefore || classDayAfter >= aukot) return
+
+          const candidate = {
+            totalAfter,
+            luokka,
+            paiva,
+            srcTunti,
+            targetTunti,
+            palkkiKey,
+            sijoitukset: temp
+          }
+          if (!best || candidate.totalAfter < best.totalAfter) best = candidate
+        })
+      })
+    })
+  })
+
+  if (!best) return { changed: false, reason: 'no_safe_move' }
+  kopioiSijoituksetYli(sijoitukset, best.sijoitukset)
+  return {
+    changed: true,
+    reason: 'targeted_single_gap_fix',
+    luokka: best.luokka,
+    paiva: best.paiva,
+    from: `${best.paiva}-${best.srcTunti}`,
+    to: `${best.paiva}-${best.targetTunti}`,
+    palkkiKey: best.palkkiKey,
+    aukotBefore: totalBefore,
+    aukotAfter: best.totalAfter
   }
 }
 
@@ -1405,7 +1869,8 @@ const sijoitaYksikko = (yksikko, tulos, sijoitukset) => {
         palkkiKey: yksikko.palkkiKey,
         yhdistetytIdt: null,
         opettajat: kurssi.opettaja || [],
-        luokat: kurssi.luokka || []
+        luokat: kurssi.luokka || [],
+        aste: normalizeAste(kurssi.aste)
       })
     })
   })
@@ -1413,13 +1878,14 @@ const sijoitaYksikko = (yksikko, tulos, sijoitukset) => {
 
 // ─── MUODOSTA SIJOITETTAVAT YKSIKÖT ─────────────────────────
 const muodostaYksikot = (periodi, kurssit, tuplatuntiAineet, options = {}) => {
+  const periodiKey = String(periodi)
   const yksikot = []
   const palkit = {}
 
   kurssit.forEach(kurssi => {
     if (kurssi.aste === 'lukio') return
     kurssi.opetus
-      .filter(o => o.periodi === periodi)
+      .filter(o => String(o.periodi) === periodiKey)
       .forEach(opetus => {
         const key = opetus.palkki
         if (!palkit[key]) {
@@ -1748,8 +2214,14 @@ const muodostaYksikot = (periodi, kurssit, tuplatuntiAineet, options = {}) => {
   }
 
   const attemptIndex = Number(options.attemptIndex || 0)
+  const splitFirstPalkkiKey = String(options.splitFirstPalkkiKey || '').trim()
 
   yksikot.sort((a, b) => {
+    if (splitFirstPalkkiKey) {
+      const aTarget = kanoninenPalkkiAvain(a.palkkiKey) === splitFirstPalkkiKey
+      const bTarget = kanoninenPalkkiAvain(b.palkkiKey) === splitFirstPalkkiKey
+      if (aTarget !== bTarget) return aTarget ? -1 : 1
+    }
     if (a.prioriteetti !== b.prioriteetti) {
       return a.prioriteetti - b.prioriteetti
     }
@@ -1771,6 +2243,7 @@ const muodostaYksikot = (periodi, kurssit, tuplatuntiAineet, options = {}) => {
 // ─── PÄÄFUNKTIO ──────────────────────────────────────────────
 const optimoi = async (req, res) => {
   const { periodi, lukuvuosiId } = req.body
+  const periodiKey = String(periodi)
 
   if (!periodi || !lukuvuosiId) {
     return res.status(400).json({ error: 'Puuttuvia tietoja' })
@@ -1788,7 +2261,9 @@ const optimoi = async (req, res) => {
 
     const kurssit = await Kurssi.find({ lukuvuosiId, kouluId })
     const aineet = await Aine.find({})
-    const saannot = await haeKoulunSaannot(kouluId)
+    const saannot = []
+    const koulu = await Koulu.findById(kouluId).select('aikatauluProfiili').lean()
+    const intervalMap = buildIntervalMapFromScheduleProfile(koulu?.aikatauluProfiili || {})
 
     const tuplatuntiAineet = {
       kotitalous: aineet
@@ -1804,7 +2279,7 @@ const optimoi = async (req, res) => {
     kurssit.forEach(k => {
       if (k.aste === 'lukio') {
         k.opetus
-          .filter(o => o.periodi === periodi)
+          .filter(o => String(o.periodi) === periodiKey)
           .forEach(o => lukioPalkkiNimet.add(o.palkki))
       }
     })
@@ -1833,11 +2308,14 @@ const optimoi = async (req, res) => {
               palkkiKey: lj.nimi,
               yhdistetytIdt: k.yhdistetytIdt || [],
               opettajat: kurssiData?.opettaja || [],
-              luokat: []
+              luokat: [],
+              aste: normalizeAste(kurssiData?.aste || 'lukio')
             })
           })
         })
       })
+      sijoitusIntervalMapRef.set(pohja, intervalMap)
+      sijoitusDebugStatsRef.set(pohja, initDebugStats())
       return pohja
     }
 
@@ -1858,7 +2336,7 @@ const optimoi = async (req, res) => {
         .filter(k => k.aste !== 'lukio')
         .reduce((palkit, kurssi) => {
           kurssi.opetus
-            .filter(o => o.periodi === periodi)
+            .filter(o => String(o.periodi) === periodiKey)
             .forEach(o => {
               if (!palkit[o.palkki]) palkit[o.palkki] = 0
               if (o.tunnit_viikossa > palkit[o.palkki]) {
@@ -1916,6 +2394,7 @@ const optimoi = async (req, res) => {
         ristiriitaRatkaisu: ['prefer_double', 'prefer_single'].includes(d.optimointiAsetus?.ristiriitaRatkaisu)
           ? d.optimointiAsetus.ristiriitaRatkaisu
           : 'prefer_double',
+        splitPrioriteetti: d.optimointiAsetus?.splitPrioriteetti === true,
         kurssiAsetukset: Array.isArray(d.optimointiAsetus?.kurssiAsetukset)
           ? d.optimointiAsetus.kurssiAsetukset
               .filter((k) => String(k?.kurssiId || '').trim())
@@ -1946,6 +2425,7 @@ const optimoi = async (req, res) => {
             })
         })
 
+      let variantBest = null
       for (let attemptIndex = 0; attemptIndex < attempts; attemptIndex++) {
         const sijoituksetCandidate = rakennaPohjaSijoitukset()
         const yksikot = muodostaYksikot(periodi, kurssit, tuplatuntiAineet, {
@@ -1954,6 +2434,7 @@ const optimoi = async (req, res) => {
           luokkaSlackByName,
           enableSubblockSplit,
           splitOnlyPalkkiKey,
+          splitFirstPalkkiKey: enableSubblockSplit ? splitOnlyPalkkiKey : '',
           salliKurssiHajotus: true,
           attemptIndex
         })
@@ -1973,6 +2454,11 @@ const optimoi = async (req, res) => {
               const onIrrotus = palkinYksikot.some((y) => String(y.id).includes('_mixed_sub'))
               const onKurssiVirtuaali = palkinYksikot.some((y) => String(y.palkkiKey).includes('~ks_') || String(y.palkkiKey).includes('~sb_'))
               const tyyppiYhteenveto = [...new Set(palkinYksikot.map((y) => y.tyyppi))].join(', ')
+              const coursePrefs = Array.isArray(asetus?.kurssiAsetukset) ? asetus.kurssiAsetukset : []
+              const coursePrefer = coursePrefs.some((c) => c?.tupla === 'prefer')
+              const tuplaRequested = asetus?.tupla === 'prefer' || coursePrefer
+              const tuplaUnitPresent = palkinYksikot.some((y) => y.tyyppi === 'tuplatunti')
+              const tuplaRequestFailed = tuplaRequested && !tuplaUnitPresent
               return {
                 palkkiKey,
                 enableSubblockSplit,
@@ -1989,7 +2475,10 @@ const optimoi = async (req, res) => {
                 kurssiToiveita: Array.isArray(asetus?.kurssiAsetukset) ? asetus.kurssiAsetukset.length : 0,
                 hajotusYritetty: onIrrotus || onKurssiVirtuaali,
                 yksikkoTyypit: tyyppiYhteenveto || '-',
-                yksikkoja: palkinYksikot.length
+                yksikkoja: palkinYksikot.length,
+                tuplaRequested,
+                tuplaUnitPresent,
+                tuplaRequestFailed
               }
             })
           console.log(`Sijoitettavia yksiköitä: ${yksikot.length} (split=${enableSubblockSplit}, target=${splitOnlyPalkkiKey || 'all'})`)
@@ -2048,7 +2537,8 @@ const optimoi = async (req, res) => {
           aineet,
           periodi,
           vaPalkkiPaivanLoppuun,
-          mahdollisetRuudut
+          mahdollisetRuudut,
+          optimointiAsetukset
         })
         ajaSingleGapPolish({
           sijoitukset: sijoituksetCandidate,
@@ -2057,7 +2547,8 @@ const optimoi = async (req, res) => {
           aineet,
           periodi,
           vaPalkkiPaivanLoppuun,
-          mahdollisetRuudut
+          mahdollisetRuudut,
+          optimointiAsetukset
         })
         try {
           ajaHardGapKorjaus({
@@ -2067,7 +2558,8 @@ const optimoi = async (req, res) => {
             aineet,
             periodi,
             vaPalkkiPaivanLoppuun,
-            mahdollisetRuudut
+            mahdollisetRuudut,
+            optimointiAsetukset
           })
         } catch (err) {
           console.warn('Hard gap korjaus ohitettu virheen vuoksi:', err.message)
@@ -2080,7 +2572,8 @@ const optimoi = async (req, res) => {
             aineet,
             periodi,
             vaPalkkiPaivanLoppuun,
-            mahdollisetRuudut
+            mahdollisetRuudut,
+            optimointiAsetukset
           })
         } catch (err) {
           console.warn('Päiväkuorman tasapainotus ohitettu virheen vuoksi:', err.message)
@@ -2090,51 +2583,90 @@ const optimoi = async (req, res) => {
         const score = (sijoittamattomat.length * 1000) + aukot
         console.log(`Attempt ${attemptIndex + 1}/${attempts} (split=${enableSubblockSplit}, target=${splitOnlyPalkkiKey || 'all'}): sijoittamatta=${sijoittamattomat.length}, aukot=${aukot}, score=${score}`)
 
-        if (!paras || score < paras.score) {
+        let paivitaParas = false
+        let valintaSyy = ''
+        if (!paras) {
+          paivitaParas = true
+          valintaSyy = 'first_candidate'
+        } else if (score < paras.score) {
+          paivitaParas = true
+          valintaSyy = 'better_score'
+        } else if (
+          score === paras.score &&
+          Boolean(enableSubblockSplit) &&
+          !Boolean(paras.enableSubblockSplit)
+        ) {
+          paivitaParas = true
+          valintaSyy = 'tie_prefer_split'
+        }
+
+        if (paivitaParas) {
+          const debugTimeOverlap = sijoitusDebugStatsRef.get(sijoituksetCandidate) || initDebugStats()
           paras = {
             score,
             sijoitukset: kloonaaSijoitukset(sijoituksetCandidate),
             sijoittamattomat,
             enableSubblockSplit,
             splitOnlyPalkkiKey: splitOnlyPalkkiKey || null,
-            debugPalkkiHajotus: debugPalkkiHajotusVariant
+            debugPalkkiHajotus: debugPalkkiHajotusVariant,
+            debugTimeOverlap,
+            selectionReason: valintaSyy
           }
         }
-        if (attemptIndex === 0) {
-          trialSummary.push({
+
+        if (
+          !variantBest ||
+          score < variantBest.score ||
+          (score === variantBest.score && attemptIndex < variantBest.attemptIndex)
+        ) {
+          variantBest = {
             split: enableSubblockSplit,
             target: splitOnlyPalkkiKey || 'all',
+            yksikot: yksikot.length,
             score,
             sijoittamatta: sijoittamattomat.length,
-            aukot
-          })
+            aukot,
+            attemptIndex
+          }
         }
         if (score === 0) break
       }
+      if (variantBest) trialSummary.push(variantBest)
     }
 
     // 1) Baseline ilman hajotusta
     ajaVariantti({ enableSubblockSplit: false, splitOnlyPalkkiKey: '' })
 
     // 2) Kohdennettu trial: vain yksi palkki kerrallaan
-    const splitTargets = Object.entries(optimointiAsetukset)
-      .filter(([palkkiKey, asetus]) => {
+    const splitCandidateInfo = Object.entries(optimointiAsetukset)
+      .map(([palkkiKey, asetus]) => {
         const coursePrefs = Array.isArray(asetus?.kurssiAsetukset) ? asetus.kurssiAsetukset : []
         const hasPrefer = coursePrefs.some((c) => c.tupla === 'prefer')
         const hasAvoid = coursePrefs.some((c) => c.tupla === 'avoid')
-        if (!hasPrefer || !hasAvoid) return false
+        if (!hasPrefer || !hasAvoid) return null
         const palkinLuokat = [...new Set(
           kurssit
             .filter((k) => k.aste !== 'lukio')
-            .filter((k) => (k.opetus || []).some((o) => Number(o.periodi) === Number(periodi) && o.palkki === palkkiKey))
+            .filter((k) => (k.opetus || []).some((o) => String(o.periodi) === periodiKey && o.palkki === palkkiKey))
             .flatMap((k) => k.luokka || [])
         )]
         const minSlack = palkinLuokat.length > 0
           ? Math.min(...palkinLuokat.map((l) => Number(luokkaSlackByName[l] ?? 0)))
           : 0
-        return minSlack >= 1
+        if (minSlack < 1) return null
+        return {
+          palkkiKey,
+          luokat: palkinLuokat,
+          minSlack,
+          splitPrioriteetti: asetus?.splitPrioriteetti === true
+        }
       })
-      .map(([palkkiKey]) => palkkiKey)
+      .filter(Boolean)
+    const splitBudget = valitseSplitTargetitBudgetilla({
+      candidates: splitCandidateInfo,
+      luokkaSlackByName
+    })
+    const splitTargets = splitBudget.selected.map((c) => c.palkkiKey)
     splitTargets.forEach((targetKey) => {
       ajaVariantti({ enableSubblockSplit: true, splitOnlyPalkkiKey: targetKey })
     })
@@ -2142,6 +2674,7 @@ const optimoi = async (req, res) => {
     const sijoitukset = paras ? paras.sijoitukset : {}
     const sijoittamattomat = paras ? paras.sijoittamattomat : []
     const debugPalkkiHajotus = paras?.debugPalkkiHajotus || []
+    const debugTimeOverlap = paras?.debugTimeOverlap || initDebugStats()
     console.log(`Valmis. Paras tulos: sijoittamatta=${sijoittamattomat.length}, score=${paras?.score ?? 'n/a'}, split=${paras?.enableSubblockSplit}`)
 
     const postSplitReport = yritaJalkiHajottaaPalkkeja({
@@ -2150,6 +2683,26 @@ const optimoi = async (req, res) => {
       kurssitData: kurssit,
       aineet,
       saannot
+    })
+    const targetedGapFixReport = ajaKohdennettuAukkoKorjaus({
+      sijoitukset,
+      kurssitData: kurssit,
+      saannot,
+      aineet,
+      periodi,
+      vaPalkkiPaivanLoppuun,
+      mahdollisetRuudut,
+      optimointiAsetukset
+    })
+    const debugAukot = listaaLuokkaPaivaAukot(sijoitukset, kaikkiYlaLuokat)
+    const finalAukot = laskeKaikkiAukot(sijoitukset, kaikkiYlaLuokat)
+    const debugHardConflicts = listaaHardConflictit({
+      sijoitukset,
+      intervalMap
+    })
+    const debugTuplaToiveet = arvioiTuplaToiveet({
+      sijoitukset,
+      optimointiAsetukset
     })
 
     const ruleViolations = evaluateRulesAgainstSijoitukset({
@@ -2210,13 +2763,45 @@ const optimoi = async (req, res) => {
       debugPalkkiHajotus,
       trialSummary: trialSummary.map((t) => ({
         ...t,
+        attempt: Number(t.attemptIndex ?? 0) + 1,
         selected:
           Boolean(paras) &&
           t.split === Boolean(paras.enableSubblockSplit) &&
           String(t.target) === String(paras.splitOnlyPalkkiKey || 'all') &&
+          Number(t.score) === Number(paras.score),
+        selectedReason:
+          Boolean(paras) &&
+          t.split === Boolean(paras.enableSubblockSplit) &&
+          String(t.target) === String(paras.splitOnlyPalkkiKey || 'all') &&
           Number(t.score) === Number(paras.score)
+            ? paras.selectionReason || null
+            : null
       })),
       postSplitReport,
+      targetedGapFixReport,
+      debugSplitBudget: {
+        selected: splitBudget.selected.map((c) => ({
+          palkkiKey: c.palkkiKey,
+          minSlack: c.minSlack,
+          splitPrioriteetti: c.splitPrioriteetti === true
+        })),
+        skipped: splitBudget.skipped,
+        remainingByLuokka: splitBudget.remaining
+      },
+      debugTimeOverlap,
+      debugTuplaToiveet,
+      debugHardConflicts: {
+        teacherConflicts: (debugHardConflicts.teacherConflicts || []).slice(0, 100),
+        classConflicts: (debugHardConflicts.classConflicts || []).slice(0, 100),
+        sameBlockPerDay: (debugHardConflicts.sameBlockPerDay || []).slice(0, 100),
+        counts: {
+          teacher: (debugHardConflicts.teacherConflicts || []).length,
+          class: (debugHardConflicts.classConflicts || []).length,
+          sameBlockPerDay: (debugHardConflicts.sameBlockPerDay || []).length
+        }
+      },
+      debugAukot: debugAukot.slice(0, 20),
+      finalAukot,
       viesti: sijoittamattomat.length === 0
         ? 'Kaikki kurssit sijoitettu!'
         : `${sijoittamattomat.length} yksikköä jäi sijoittamatta`
@@ -2228,4 +2813,22 @@ const optimoi = async (req, res) => {
   }
 }
 
-module.exports = { optimoi }
+const metadata = async (req, res) => {
+  if (!req.kouluId) {
+    return res.status(400).json({
+      error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).'
+    })
+  }
+  const koulu = await Koulu.findById(req.kouluId).select('aikatauluProfiili').lean()
+  return res.json({
+    hardcodedConstraints: HARDCODED_CONSTRAINTS,
+    schoolRules: [],
+    scheduleProfile: koulu?.aikatauluProfiili || {
+      alakoulu: { paivat: [] },
+      ylakoulu: { paivat: [] },
+      lukio: { paivat: [] }
+    }
+  })
+}
+
+module.exports = { optimoi, metadata }

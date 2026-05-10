@@ -113,6 +113,7 @@ const save = async (req, res) => {
         ristiriitaRatkaisu: ['prefer_double', 'prefer_single'].includes(optimointiAsetus.ristiriitaRatkaisu)
           ? optimointiAsetus.ristiriitaRatkaisu
           : 'prefer_double',
+        splitPrioriteetti: optimointiAsetus.splitPrioriteetti === true,
         kurssiAsetukset
       }
     }
@@ -157,6 +158,7 @@ const saveOptimointiAsetukset = async (req, res) => {
         const ristiriitaRatkaisu = ['prefer_double', 'prefer_single'].includes(a?.ristiriitaRatkaisu)
           ? a.ristiriitaRatkaisu
           : 'prefer_double'
+        const splitPrioriteetti = a?.splitPrioriteetti === true
         const kurssiAsetukset = Array.isArray(a?.kurssiAsetukset)
           ? a.kurssiAsetukset
             .filter((k) => String(k?.kurssiId || '').trim())
@@ -170,7 +172,7 @@ const saveOptimointiAsetukset = async (req, res) => {
           {
             $set: {
               kouluId: req.kouluId,
-              optimointiAsetus: { laita, tupla, ristiriitaRatkaisu, kurssiAsetukset }
+              optimointiAsetus: { laita, tupla, ristiriitaRatkaisu, splitPrioriteetti, kurssiAsetukset }
             },
             $setOnInsert: {
               tunnit: []
