@@ -24,6 +24,7 @@
     "lint": "eslint .",
     "export:optimointi-snapshot": "node scripts/export-optimointi-snapshot.js",
     "migrate:tehtavat-lukuvuosi": "node migrations/migraatioTehtavatLukuvuosi.js",
+    "migrate:lukuvuosi-koulu": "node migrations/migraatioLukuvuosiKoulukohtainen.js",
     "build:ui": "cd /mnt/c/Users/hanne/projektit/lukujarjestys/frontend && npm run build && cp -r dist ../backend",
     "deploy:full": "npm run build:ui && git add . && git commit -m uibuild && git push"
   },

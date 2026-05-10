@@ -28,7 +28,15 @@ const errorHandler = (error, request, response, next) => {
     return response.status(400).send({ error: 'virheellinen id' })
   } else if (error.name === 'ValidationError') {
     return response.status(400).json({ error: error.message })
-  } else if (error.name === 'MongoServerError' && error.message.includes('E11000 duplicate key error')) {
+  } else if (error.name === 'MongoServerError' && error.code === 11000) {
+    if (
+      String(error.message || '').includes('kouluId') &&
+      String(error.message || '').includes('name')
+    ) {
+      return response.status(400).json({
+        error: 'Saman niminen lukuvuosi on jo olemassa tälle koululle.',
+      })
+    }
     return response.status(400).json({ error: 'expected `opettaja` to be unique' })
   }
 

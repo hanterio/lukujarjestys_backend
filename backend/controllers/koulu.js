@@ -340,9 +340,14 @@ kouluRouter.patch(
       if (!raw || !mongoose.Types.ObjectId.isValid(raw)) {
         return response.status(400).json({ error: 'Kelvollinen lukuvuosiId vaaditaan' })
       }
-      const lv = await Lukuvuosi.findById(raw)
+      const lv = await Lukuvuosi.findById(raw).lean()
       if (!lv) {
         return response.status(404).json({ error: 'Lukuvuotta ei löydy' })
+      }
+      if (!lv.kouluId || String(lv.kouluId) !== String(kid)) {
+        return response.status(400).json({
+          error: 'Lukuvuosi ei kuulu valitulle koululle.',
+        })
       }
       await Koulu.findByIdAndUpdate(kid, { aktiivinenLukuvuosiId: lv._id })
       response.json({

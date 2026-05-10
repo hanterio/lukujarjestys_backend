@@ -26,14 +26,22 @@ async function getEffectiveLukuvuosiForRequest (request) {
   if (!canUseEsikatseluLukuvuosi(request.user)) {
     return { effective: published, published, esikatselu: false }
   }
-  const lv = await Lukuvuosi.findById(headerRaw)
-  if (!lv) {
+  const lvLean = await Lukuvuosi.findById(headerRaw).lean()
+  if (!lvLean) {
     return { effective: published, published, esikatselu: false }
   }
-  if (published && lv._id.toString() === published._id.toString()) {
+  if (
+    request.kouluId &&
+    lvLean.kouluId &&
+    String(lvLean.kouluId) !== String(request.kouluId)
+  ) {
     return { effective: published, published, esikatselu: false }
   }
-  return { effective: lv, published, esikatselu: true }
+  if (published && lvLean._id.toString() === published._id.toString()) {
+    return { effective: published, published, esikatselu: false }
+  }
+  const lvDoc = await Lukuvuosi.findById(headerRaw)
+  return { effective: lvDoc, published, esikatselu: true }
 }
 
 module.exports = {

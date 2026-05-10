@@ -13,7 +13,15 @@ const lukuvuosiSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
-  }
+  },
+  /** Lukuvuodet ovat koulukohtaisia; sama näyttönimi sallittu eri kouluilla. */
+  kouluId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Koulu',
+    required: true,
+  },
 })
+
+lukuvuosiSchema.index({ kouluId: 1, name: 1 }, { unique: true })
 
 module.exports = mongoose.model('Lukuvuosi', lukuvuosiSchema)

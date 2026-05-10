@@ -34,10 +34,16 @@ router.get('/active', async (req, res) => {
   }
 })
 
-/** Kaikki lukuvuodet (hallinnon valikkoon). */
+/** Lukuvuodet valitulle koululle (hallinnon valikkoon). */
 router.get('/', requireKouluHallinta, async (req, res) => {
   try {
-    const lista = await Lukuvuosi.find({}).sort({ name: 1 }).lean()
+    const kid = req.kouluId
+    if (!kid) {
+      return res.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
+    const lista = await Lukuvuosi.find({ kouluId: kid }).sort({ name: 1 }).lean()
     res.json(lista)
   } catch (error) {
     console.error('Lukuvuodet lista:', error)
@@ -45,9 +51,15 @@ router.get('/', requireKouluHallinta, async (req, res) => {
   }
 })
 
-/** Luo uusi lukuvuosi (nimi esim. 2026–2027). */
+/** Luo uusi lukuvuosi valitulle koululle (nimi esim. 2026–2027). */
 router.post('/', requireKouluHallinta, requireKouluEiPoistettu, async (req, res, next) => {
   try {
+    const kid = req.kouluId
+    if (!kid) {
+      return res.status(400).json({
+        error: 'Koulu ei ole tiedossa. Valitse koulu (superadmin).',
+      })
+    }
     const name = (req.body.name || '').trim()
     if (!name) {
       return res.status(400).json({ error: 'Lukuvuoden nimi puuttuu' })
@@ -55,6 +67,7 @@ router.post('/', requireKouluHallinta, requireKouluEiPoistettu, async (req, res,
     const doc = await Lukuvuosi.create({
       name,
       status: 'ACTIVE',
+      kouluId: kid,
     })
     res.status(201).json(doc)
   } catch (error) {
