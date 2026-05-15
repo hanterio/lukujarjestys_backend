@@ -110,7 +110,9 @@ router.post('/rekisteroidy', async (req, res) => {
   res.status(201).json({
     token,
     nimi: kayttaja.nimi,
-    rooli: kayttaja.rooli
+    rooli: kayttaja.rooli,
+    kayttajaId: String(kayttaja._id),
+    email: kayttaja.email,
   })
 })
 
@@ -136,7 +138,9 @@ router.post('/kirjaudu', async (req, res) => {
   res.json({
     token,
     nimi: kayttaja.nimi,
-    rooli: kayttaja.rooli
+    rooli: kayttaja.rooli,
+    kayttajaId: String(kayttaja._id),
+    email: kayttaja.email,
   })
 })
 
@@ -205,7 +209,9 @@ router.post('/nollaa-salasana', async (req, res) => {
   res.json({
     token: jwtToken,
     nimi: kayttaja.nimi,
-    rooli: kayttaja.rooli
+    rooli: kayttaja.rooli,
+    kayttajaId: String(kayttaja._id),
+    email: kayttaja.email,
   })
 })
 

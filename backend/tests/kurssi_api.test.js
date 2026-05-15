@@ -1,3 +1,5 @@
+require('./testEnvGuard')
+
 const { test, after, describe, beforeEach } = require('node:test')
 const assert = require('node:assert')
 const mongoose = require('mongoose')

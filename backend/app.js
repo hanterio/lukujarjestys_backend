@@ -123,7 +123,9 @@ app.get('/api/auth/microsoft/callback',
       config.SECRET,
       { expiresIn: '8h' }
     )
-    res.redirect(`${config.FRONTEND_URL}/?token=${token}&nimi=${encodeURIComponent(user.nimi)}&rooli=${kayttaja.rooli}`)
+    res.redirect(
+      `${config.FRONTEND_URL}/?token=${token}&nimi=${encodeURIComponent(user.nimi)}&rooli=${kayttaja.rooli}&kayttajaId=${kayttaja._id}&email=${encodeURIComponent(kayttaja.email || '')}`,
+    )
   }
 )
 

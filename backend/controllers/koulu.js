@@ -320,6 +320,59 @@ kouluRouter.get('/kayttajat', async (request, response) => {
   response.json(list)
 })
 
+/** Vaihda saman koulun käyttäjän rooli (teacher ↔ school_admin). Vähintään yksi ylläpitäjä. */
+kouluRouter.patch(
+  '/kayttajat/:kayttajaId/rooli',
+  middleware.requireKouluHallinta,
+  middleware.requireKouluEiPoistettu,
+  async (request, response) => {
+    const kid = request.kouluId
+    if (!kid) {
+      return response.status(400).json({
+        error: 'Koulu ei ole tiedossa. Superadmin: valitse koulu ylävalikosta.',
+      })
+    }
+    const rawId = request.params.kayttajaId
+    if (!rawId || !mongoose.Types.ObjectId.isValid(rawId)) {
+      return response.status(400).json({ error: 'Kelvollinen käyttäjätunniste vaaditaan' })
+    }
+    const uusiRooli = request.body?.rooli
+    if (uusiRooli !== 'teacher' && uusiRooli !== 'school_admin') {
+      return response.status(400).json({ error: 'rooli on oltava teacher tai school_admin' })
+    }
+
+    const kohde = await Kayttaja.findById(rawId)
+    if (!kohde) {
+      return response.status(404).json({ error: 'Käyttäjää ei löydy' })
+    }
+    if (String(kohde.koulu) !== String(kid)) {
+      return response.status(403).json({ error: 'Käyttäjä ei kuulu valitulle koululle' })
+    }
+    if (kohde.rooli === 'superadmin') {
+      return response.status(403).json({ error: 'Superadmin-roolia ei voi muuttaa tällä rajapinnalla' })
+    }
+    if (kohde.rooli !== 'teacher' && kohde.rooli !== 'school_admin') {
+      return response.status(400).json({ error: 'Roolia ei voi muuttaa' })
+    }
+
+    if (kohde.rooli === 'school_admin' && uusiRooli === 'teacher') {
+      const yllapitajia = await Kayttaja.countDocuments({
+        koulu: kid,
+        rooli: 'school_admin',
+      })
+      if (yllapitajia <= 1) {
+        return response.status(400).json({
+          error: 'Koululla pitää olla vähintään yksi ylläpitäjä',
+        })
+      }
+    }
+
+    kohde.rooli = uusiRooli
+    await kohde.save()
+    return response.json({ rooli: kohde.rooli })
+  },
+)
+
 /**
  * Aseta koulun aktiivinen lukuvuosi (kurssit, tuonti, raportit).
  * Superadmin: valittu koulu otsakkeesta (request.kouluId).
